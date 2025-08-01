@@ -1,0 +1,60 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>処理中... - Sales Bot</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+    <!-- ====================================
+         処理中画面コンテナ
+         ==================================== -->
+    <div class="process-container">
+        
+        <!-- 処理中ヘッダー -->
+        <div class="process-header">
+            <img src="icons/ポチレターアイコン48.png" alt="Logo" class="process-logo">
+            <h1 class="process-title">自動送信処理中...</h1>
+            <p class="process-description">
+                お問い合わせフォームを検索し、情報を入力して送信しています。<br>
+                このページを閉じないでください。
+            </p>
+        </div>
+
+        <!-- 進捗表示セクション -->
+        <div class="process-progress">
+            
+            <!-- 進捗情報 -->
+            <div class="process-progress-info">
+                <span>進捗状況: <strong id="progressCount">0/0</strong></span>
+                <span class="progress-percentage" id="progressPercentage">0%</span>
+            </div>
+
+            <!-- プログレスバー -->
+            <div class="progress-bar-container">
+                <progress id="progressBar" value="0" max="100"></progress>
+            </div>
+
+            <!-- 処理状態表示 -->
+            <div class="process-status">
+                <span class="process-status-icon">⚙️</span>
+                <span id="statusText">処理中...</span>
+            </div>
+            
+        </div>
+
+        <!-- 現在処理中のURL表示 -->
+        <div class="current-url">
+            <p>現在処理中のURL:</p>
+            <div id="currentUrl" class="current-url-display">-</div>
+        </div>
+        
+    </div>
+
+    <!-- ====================================
+         JavaScript読み込み
+         ==================================== -->
+    <script src="process.js"></script>
+</body>
+</html>

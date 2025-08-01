@@ -1,0 +1,55 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>エラーが発生しました - 自動お問い合わせ送信ツール</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+    <!-- メインコンテナ -->
+    <div class="done-container">
+        
+        <!-- エラーアイコン -->
+        <div class="done-icon error-icon">⚠</div>
+        
+        <!-- エラータイトル -->
+        <h1 class="done-title">エラーが発生しました</h1>
+        
+        <!-- エラー説明文 -->
+        <p class="done-description">
+            処理中に問題が発生しました。<br>
+            もう一度お試しいただくか、管理者にお問い合わせください。
+        </p>
+        
+        <!-- アクションボタンエリア -->
+        <div class="done-actions error-actions">
+            <button id="retryButton" class="primary-button">再試行する</button>
+            <button id="backToMain" class="secondary-button">トップに戻る</button>
+        </div>
+        
+    </div>
+
+    <!-- JavaScript処理 -->
+    <script>
+        /**
+         * DOM読み込み完了時の処理
+         */
+        document.addEventListener('DOMContentLoaded', function() {
+            
+            // 再試行ボタンのイベントリスナー
+            document.getElementById('retryButton').addEventListener('click', function() {
+                // 前のページに戻る
+                history.back();
+            });
+
+            // トップに戻るボタンのイベントリスナー
+            document.getElementById('backToMain').addEventListener('click', function() {
+                // メインページに遷移
+                chrome.tabs.update({ url: 'main.html' });
+            });
+            
+        });
+    </script>
+</body>
+</html>

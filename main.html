@@ -1,0 +1,525 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>Salesbot</title>
+    <link rel="stylesheet" href="styles.css">
+    <script src="supabase/supabase.js"></script>
+</head>
+
+<body>
+    <!-- ====================================
+         メインアプリケーションコンテナ
+         ==================================== -->
+    <div class="app-container">
+        
+        <!-- ヘッダー部分 -->
+        <header class="app-header">
+            <div class="logo">
+                <img src="icons/ポチレターアイコン48.png" alt="Logo">
+                <h1>Salesbot</h1>
+            </div>
+            <div class="license-info">
+                <span id="licenseStatus" class="license-badge">ライセンス状態確認中...</span>
+                <span id="deviceInfo" class="device-badge">端末情報取得中...</span>
+            </div>
+        </header>
+
+        <!-- メインコンテンツエリア -->
+        <div class="main-content">
+            
+            <!-- ====================================
+                 サイドバー（ナビゲーション）
+                 ==================================== -->
+            <div class="sidebar">
+                <nav class="nav-menu">
+                    <button class="nav-item" data-tab="dashboard">
+                        <img class="icon" src="/icons/dashboard.png" alt="ダッシュボード" />
+                        ダッシュボード
+                    </button>
+                    <button class="nav-item" data-tab="results">
+                        <img class="icon" src="/icons/result.png" alt="送信結果" />
+                        送信結果
+                    </button>
+                    <button class="nav-item" data-tab="url-list">
+                        <img class="icon" src="/icons/url-list.png" alt="送信先リスト管理" />
+                        送信先リスト管理
+                    </button>
+                    <button class="nav-item" data-tab="profiles">
+                        <img class="icon" src="/icons/profiles.png" alt="フォーム入力データ管理" />
+                        フォーム入力データ管理
+                    </button>
+                    <button class="nav-item" data-tab="settings">
+                        <img class="icon" src="/icons/settings.png" alt="設定" />
+                        設定
+                    </button>
+                </nav>
+                <div class="sidebar-footer"></div>
+            </div>
+
+            <!-- ====================================
+                 コンテンツエリア（タブ表示）
+                 ==================================== -->
+            <div class="content-area">
+                
+                <!-- ダッシュボードタブ -->
+                <div id="dashboard" class="tab-content">
+                    <div class="dashboard-header">
+                        <h2>ダッシュボード</h2>
+                        <div class="dashboard-actions">
+                            <button id="refreshDashboard" class="refresh-button">
+                                <img class="icon" src="/icons/refresh.png" alt="更新" />
+                                更新
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- ダッシュボードカード -->
+                    <div class="dashboard-cards">
+                        <!-- 現在の状態カード -->
+                        <div class="dashboard-card">
+                            <div class="card-header">現在の状態</div>
+                            <div class="card-content">
+                                <div class="card-stat">
+                                    <div class="stat-label">送信状態</div>
+                                    <div id="sendingStatus" class="stat-value">
+                                        <span class="status-indicator"></span>待機中
+                                    </div>
+                                </div>
+                                <div class="card-stat">
+                                    <div class="stat-label">最終実行</div>
+                                    <div id="lastExecutionTime" class="stat-value">なし</div>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- 統計カード -->
+                        <div class="dashboard-card">
+                            <div class="card-header">統計</div>
+                            <div class="card-content">
+                                <div class="card-stat">
+                                    <div class="stat-label">送信済み件数</div>
+                                    <div id="totalSentUrls" class="stat-value">0</div>
+                                </div>
+                                <div class="card-stat">
+                                    <div class="stat-label">直近の成功率</div>
+                                    <div id="successRate" class="stat-value">0%</div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 進捗表示セクション -->
+                    <div class="progress-section">
+                        <h3>現在の処理</h3>
+                        <div class="progress-container">
+                            <div class="progress-info">
+                                <span>進捗状況: <strong id="progressCount">0/0</strong></span>
+                                <span class="progress-percentage" id="dashboardProgressPercentage">0%</span>
+                            </div>
+                            <progress id="progressBar" value="0" max="100"></progress>
+                        </div>
+                        <div id="currentProcessingUrl" class="current-url-display" style="display: none;">
+                            処理中のURLはありません
+                        </div>
+                    </div>
+
+                    <!-- 最近の結果表示 -->
+                    <div class="recent-results">
+                        <h3>送信履歴</h3>
+                        <div id="recentResultsList" class="results-list">
+                            <div class="no-results">送信結果はありません</div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ====================================
+                     送信先リスト管理タブ
+                     ==================================== -->
+                <div id="url-list" class="tab-content">
+                    <h2>送信先リスト管理</h2>
+                    <div class="url-management">
+                        <div class="form-group">
+                            <label for="urlListTextarea">送信先URL一覧 (1行に1URL)</label>
+                            <textarea 
+                                id="urlListTextarea" 
+                                class="url-list-textarea" 
+                                rows="20" 
+                                cols="100" 
+                                placeholder="https://example.com">
+                            </textarea>
+                        </div>
+                        
+                        <div class="url-actions">
+                            <div class="url-actions-top">
+                                <button id="saveUrlList" class="primary-button">設定を保存</button>
+                                <button id="clearUrlList" class="danger-button">クリア</button>
+                            </div>
+                            <div class="url-actions-bottom">
+                                <button id="executeFromUrlTab" class="success-button">
+                                    <img class="icon" src="/icons/play.png" alt="送信開始" />
+                                    送信開始
+                                </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ====================================
+                     フォーム入力データ管理タブ
+                     ==================================== -->
+                <div id="profiles" class="tab-content">
+                    <h2>フォーム入力データ管理</h2>
+                    <div class="profile-management">
+                        
+                        <!-- プロフィール選択 -->
+                        <div class="profile-selector">
+                            <label for="profileSelect">プロフィール選択</label>
+                            <div class="profile-select-wrapper">
+                                <select id="profileSelect" class="profile-select"></select>
+                                <div class="profile-actions">
+                                    <button id="addNewProfile" class="icon-button" title="新規プロフィール作成">
+                                        新規追加
+                                    </button>
+                                    <button id="deleteProfile" class="icon-button" title="このプロフィールを削除">
+                                        削除
+                                    </button>
+                                </div>
+                            </div>
+                        </div>
+
+                        <!-- プロフィールフォーム -->
+                        <div class="profile-form">
+                            
+                            <!-- プロフィール名 -->
+                            <div class="form-section">
+                                <div class="form-group">
+                                    <label for="profileName">プロフィール名</label>
+                                    <input type="text" id="profileName" class="form-control">
+                                </div>
+
+                                <!-- 基本情報 -->
+                                <h3>基本情報</h3>
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="sei">姓</label>
+                                        <input type="text" id="sei" class="form-control">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="mei">名</label>
+                                        <input type="text" id="mei" class="form-control">
+                                    </div>
+                                </div>
+
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="seiKana">姓（カナ）</label>
+                                        <input type="text" id="seiKana" class="form-control">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="meiKana">名（カナ）</label>
+                                        <input type="text" id="meiKana" class="form-control">
+                                    </div>
+                                </div>
+
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="seiHira">姓（ひらがな）</label>
+                                        <input type="text" id="seiHira" class="form-control">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="meiHira">名（ひらがな）</label>
+                                        <input type="text" id="meiHira" class="form-control">
+                                    </div>
+                                </div>
+
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="company">会社名</label>
+                                        <input type="text" id="company" class="form-control">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="department">部署名</label>
+                                        <input type="text" id="department" class="form-control">
+                                    </div>
+                                </div>
+
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="position">役職</label>
+                                        <input type="text" id="position" class="form-control">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="industry">業種</label>
+                                        <input type="text" id="industry" class="form-control">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="memberCount">従業員数</label>
+                                        <input type="text" id="memberCount" class="form-control">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- 連絡先情報 -->
+                            <div class="form-section">
+                                <h3>連絡先情報</h3>
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="url">Webサイト</label>
+                                        <input type="text" id="url" class="form-control">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="email">メールアドレス</label>
+                                        <input type="email" id="email" class="form-control">
+                                    </div>
+                                </div>
+
+                                <div class="form-row">
+                                    <!-- 電話番号 -->
+                                    <div class="form-group phone-group">
+                                        <label>電話番号</label>
+                                        <div class="phone-inputs">
+                                            <input type="text" id="tel1" class="form-control" maxlength="4">
+                                            <span>-</span>
+                                            <input type="text" id="tel2" class="form-control" maxlength="4">
+                                            <span>-</span>
+                                            <input type="text" id="tel3" class="form-control" maxlength="4">
+                                        </div>
+                                    </div>
+                                    
+                                    <!-- FAX番号 -->
+                                    <div class="form-group phone-group">
+                                        <label>FAX番号</label>
+                                        <div class="phone-inputs">
+                                            <input type="text" id="fax1" class="form-control">
+                                            <span>-</span>
+                                            <input type="text" id="fax2" class="form-control">
+                                            <span>-</span>
+                                            <input type="text" id="fax3" class="form-control">
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- 住所 -->
+                            <div class="form-section">
+                                <h3>住所</h3>
+                                <div class="form-row">
+                                    <!-- 郵便番号 -->
+                                    <div class="form-group zip-group">
+                                        <label>郵便番号</label>
+                                        <div class="zip-inputs">
+                                            <input type="text" id="zip1" class="form-control" maxlength="3">
+                                            <span>-</span>
+                                            <input type="text" id="zip2" class="form-control" maxlength="4">
+                                        </div>
+                                    </div>
+                                </div>
+
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="address1">都道府県</label>
+                                        <input type="text" id="address1" class="form-control">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="address2">市区町村</label>
+                                        <input type="text" id="address2" class="form-control">
+                                    </div>
+                                </div>
+
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="address3">番地</label>
+                                        <input type="text" id="address3" class="form-control">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="address4">建物名・部屋番号</label>
+                                        <input type="text" id="address4" class="form-control">
+                                    </div>
+                                </div>
+                            </div>
+
+                            <!-- メッセージ -->
+                            <div class="form-section">
+                                <h3>メッセージ</h3>
+                                <div class="form-group">
+                                    <label for="subject">件名</label>
+                                    <input type="text" id="subject" class="form-control">
+                                </div>
+                                <div class="form-group">
+                                    <label for="message">メッセージ本文</label>
+                                    <textarea id="message" rows="8" class="form-control"></textarea>
+                                </div>
+                            </div>
+
+                            <!-- フォームアクション -->
+                            <div class="form-actions">
+                                <button id="saveProfile" class="primary-button">設定を保存</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ====================================
+                     送信結果タブ
+                     ==================================== -->
+                <div id="results" class="tab-content">
+                    <h2>送信結果</h2>
+                    <div class="results-management">
+                        
+                        <!-- 結果選択 -->
+                        <div class="results-selector">
+                            <label for="resultSelect">送信結果選択</label>
+                            <select id="resultSelect" class="result-select"></select>
+                        </div>
+
+                        <!-- 結果詳細 -->
+                        <div class="results-detail">
+                            <div class="form-group">
+                                <label for="resultTitle">タイトル</label>
+                                <div class="result-title-container">
+                                    <input type="text" id="resultTitle" class="form-control">
+                                    <button id="saveResultTitle" class="small-button">保存</button>
+                                </div>
+                            </div>
+
+                            <!-- 結果リスト -->
+                            <div class="results-list-container">
+                                <div id="resultsList" class="results-list detailed">
+                                    <div class="no-results">送信結果はありません</div>
+                                </div>
+                            </div>
+
+                            <!-- 結果アクション -->
+                            <div class="results-actions">
+                                <button id="exportResults" class="primary-button">CSVでエクスポート</button>
+                                <button id="deleteResult" class="danger-button">この結果を削除</button>
+                                <button id="deleteAllResults" class="danger-button">全ての結果を削除</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ====================================
+                     設定タブ
+                     ==================================== -->
+                <div id="settings" class="tab-content">
+                    <h2>設定</h2>
+                    <div class="settings-sections">
+                        
+                        <!-- 重複設定 -->
+                        <div class="settings-section">
+                            <h3>重複設定</h3>
+                            <div class="form-group checkbox-group">
+                                <input type="checkbox" id="preventDuplicateSend">
+                                <label for="preventDuplicateSend">重複送信を防止する</label>
+                                <small>　　同じコンタクトフォームに複数回送信されるのを防止します</small>
+                            </div>
+                            <div class="form-actions">
+                                <button id="saveGeneralSettings" class="primary-button">設定を保存</button>
+                            </div>
+                        </div>
+
+                        <!-- 送信制限時間設定 -->
+                        <div class="settings-section">
+                            <h3>送信制限時間設定</h3>
+                            <div class="form-group checkbox-group">
+                                <input type="checkbox" id="enableTimeRestriction">
+                                <label for="enableTimeRestriction">時間制限を有効にする</label>
+                                <small>　　指定した時間帯は曜日を問わず自動送信を行いません</small>
+                            </div>
+                            
+                            <div class="time-restriction-settings" id="timeRestrictionSettings">
+                                <div class="form-row">
+                                    <div class="form-group">
+                                        <label for="restrictionStartTime">制限開始時間</label>
+                                        <input type="time" id="restrictionStartTime" class="form-control">
+                                    </div>
+                                    <div class="form-group">
+                                        <label for="restrictionEndTime">制限終了時間</label>
+                                        <input type="time" id="restrictionEndTime" class="form-control">
+                                    </div>
+                                </div>
+                                <small>例：22:00-08:00 と設定すると、毎日22時から翌朝8時まで送信を制限します</small>
+                            </div>
+                            
+                            <div class="form-actions">
+                                <button id="saveTimeSettings" class="primary-button">設定を保存</button>
+                            </div>
+                        </div>
+
+                        <!-- 送信制限曜日設定 -->
+                        <div class="settings-section">
+                            <h3>送信制限曜日設定</h3>
+                            <div class="form-group">
+                                <label>終日送信を制限する曜日を選択してください</label>
+                                <small>選択した曜日は終日（24時間）送信が制限されます</small>
+                                
+                                <div class="weekday-selector">
+                                    <div class="weekday-item">
+                                        <input type="checkbox" id="weekday-0" class="weekday-checkbox">
+                                        <label for="weekday-0">日</label>
+                                    </div>
+                                    <div class="weekday-item">
+                                        <input type="checkbox" id="weekday-1" class="weekday-checkbox">
+                                        <label for="weekday-1">月</label>
+                                    </div>
+                                    <div class="weekday-item">
+                                        <input type="checkbox" id="weekday-2" class="weekday-checkbox">
+                                        <label for="weekday-2">火</label>
+                                    </div>
+                                    <div class="weekday-item">
+                                        <input type="checkbox" id="weekday-3" class="weekday-checkbox">
+                                        <label for="weekday-3">水</label>
+                                    </div>
+                                    <div class="weekday-item">
+                                        <input type="checkbox" id="weekday-4" class="weekday-checkbox">
+                                        <label for="weekday-4">木</label>
+                                    </div>
+                                    <div class="weekday-item">
+                                        <input type="checkbox" id="weekday-5" class="weekday-checkbox">
+                                        <label for="weekday-5">金</label>
+                                    </div>
+                                    <div class="weekday-item">
+                                        <input type="checkbox" id="weekday-6" class="weekday-checkbox">
+                                        <label for="weekday-6">土</label>
+                                    </div>
+                                </div>
+                            </div>
+                            
+                            <div class="form-actions">
+                                <button id="saveWeekdaySettings" class="primary-button">設定を保存</button>
+                            </div>
+                        </div>
+
+                        <!-- 除外ドメイン設定 -->
+                        <div class="settings-section">
+                            <h3>除外ドメイン設定</h3>
+                            <div class="form-group">
+                                <label for="excludeDomains">送信しないドメイン (1行に1ドメイン)</label>
+                                <textarea id="excludeDomains" rows="10" class="form-control"></textarea>
+                                <small>これらのドメインが含まれるURLには送信されません</small>
+                            </div>
+                            
+                            <div class="form-actions">
+                                <button id="saveExcludeDomains" class="primary-button">設定を保存</button>
+                                <button id="resetExcludeDomains" class="secondary-button">デフォルト設定に戻す</button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <!-- ====================================
+         トースト通知
+         ==================================== -->
+    <div id="toast" class="toast">
+        <div class="toast-content"></div>
+    </div>
+
+    <!-- JavaScript読み込み -->
+    <script src="main.js"></script>
+</body>
+</html>

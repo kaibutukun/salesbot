@@ -1,0 +1,63 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>送信制限中 - 自動お問い合わせ送信ツール</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+
+<body>
+    <!-- ====================================
+         送信制限画面コンテナ
+         ==================================== -->
+    <div class="done-container">
+        
+        <!-- 制限アイコン -->
+        <div class="done-icon warning-icon">⏱</div>
+        
+        <!-- 制限タイトル -->
+        <h1 class="done-title">送信制限時間帯です</h1>
+        
+        <!-- 制限説明文 -->
+        <p class="done-description">
+            現在の時間帯は送信が制限されています。<br>
+            設定された制限外に再度お試しください。
+        </p>
+        
+        <!-- 時間制限情報表示エリア -->
+        <div class="time-restriction-info">
+            
+            <!-- 時間制限設定 -->
+            <div class="time-info-item">
+                <strong>時間制限:</strong> 
+                <span id="restrictionTime">---</span>
+            </div>
+            
+            <!-- 曜日制限設定 -->
+            <div class="time-info-item">
+                <strong>曜日制限:</strong> 
+                <span id="restrictionDays">---</span>
+            </div>
+            
+            <!-- 現在の時刻 -->
+            <div class="time-info-item">
+                <strong>現在の時刻:</strong> 
+                <span id="currentTime">---</span>
+            </div>
+            
+        </div>
+        
+        <!-- アクションボタンエリア -->
+        <div class="done-actions">
+            <button id="backToMain" class="primary-button">トップに戻る</button>
+            <button id="changeSettings" class="secondary-button">設定を変更する</button>
+        </div>
+        
+    </div>
+
+    <!-- ====================================
+         JavaScript読み込み
+         ==================================== -->
+    <script src="time_restricted.js"></script>
+</body>
+</html>

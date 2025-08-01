@@ -1,0 +1,71 @@
+<!DOCTYPE html>
+<html lang="ja">
+<head>
+    <meta charset="UTF-8">
+    <title>ログイン - Sales Bot</title>
+    <link rel="stylesheet" href="styles.css">
+</head>
+
+<body class="popup-body">
+    <!-- ====================================
+         ログインコンテナ
+         ==================================== -->
+    <div class="login-container">
+        
+        <!-- ログインヘッダー -->
+        <div class="login-header">
+            <img src="icons/ポチレターアイコン48.png" alt="Logo" class="login-logo">
+            <h1 class="login-title">自動お問い合わせ送信ツール</h1>
+        </div>
+
+        <!-- ログインフォーム -->
+        <div class="login-form">
+            
+            <!-- メールアドレス入力 -->
+            <div class="form-group">
+                <label for="email">メールアドレス:</label>
+                <input type="email" id="email" class="form-control" required>
+            </div>
+
+            <!-- 認証キー入力 -->
+            <div class="form-group">
+                <label for="password">認証キー:</label>
+                <input type="password" id="password" class="form-control" required>
+            </div>
+
+            <!-- ログインボタン -->
+            <button id="loginButton" class="login-button">ログイン</button>
+
+            <!-- エラーメッセージ -->
+            <div id="errorMessage" class="error-message">
+                ログインに失敗しました。メールアドレスとパスワードを確認してください。
+            </div>
+
+            <!-- 成功メッセージ -->
+            <div id="successMessage" class="success-message">
+                ログインに成功しました！
+            </div>
+
+            <!-- アプリを開くボタン -->
+            <button id="openAppButton" class="login-button open-app">
+                アプリを開く
+            </button>
+
+            <!-- ログアウトボタン -->
+            <button id="logoutButton" class="login-button logout-button">
+                ログアウト
+            </button>
+
+            <!-- デバイス情報表示エリア -->
+            <div id="deviceInfo" class="device-info-container" style="display: none;"></div>
+            
+        </div>
+    </div>
+
+    <!-- ====================================
+         JavaScript読み込み
+         ==================================== -->
+    <script src="supabase/supabase.js"></script>
+    <script src="login.js"></script>
+</body>
+</html>
