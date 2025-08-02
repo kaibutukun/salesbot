@@ -339,7 +339,7 @@ document.addEventListener('DOMContentLoaded', function() {
      * アプリを開くボタンのイベントハンドラー
      */
     openAppButton.addEventListener('click', function() {
-        chrome.tabs.create({ url: 'main.html' });
+        chrome.tabs.create({ url: 'ui/main.html' });
     });
 
     /**

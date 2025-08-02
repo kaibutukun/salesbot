@@ -168,14 +168,14 @@ document.addEventListener('DOMContentLoaded', function() {
      * トップに戻るボタンのイベントリスナー
      */
     document.getElementById('backToMain').addEventListener('click', function() {
-        chrome.tabs.update({ url: 'main.html' });
+        chrome.tabs.update({ url: 'ui/main.html' });
     });
 
     /**
      * 設定を変更するボタンのイベントリスナー
      */
     document.getElementById('changeSettings').addEventListener('click', function() {
-        chrome.tabs.update({ url: 'main.html?tab=settings' });
+        chrome.tabs.update({ url: 'ui/main.html?tab=settings' });
     });
 
 });

@@ -3,8 +3,8 @@
 <head>
     <meta charset="UTF-8">
     <title>Salesbot</title>
-    <link rel="stylesheet" href="styles.css">
-    <script src="supabase/supabase.js"></script>
+    <link rel="stylesheet" href="../assets/styles.css">
+    <script src="../supabase/supabase.js"></script>
 </head>
 
 <body>
@@ -16,7 +16,7 @@
         <!-- ヘッダー部分 -->
         <header class="app-header">
             <div class="logo">
-                <img src="icons/ポチレターアイコン48.png" alt="Logo">
+                <img src="../assets/icons/ポチレターアイコン48.png" alt="Logo">
                 <h1>Salesbot</h1>
             </div>
             <div class="license-info">
@@ -34,23 +34,23 @@
             <div class="sidebar">
                 <nav class="nav-menu">
                     <button class="nav-item" data-tab="dashboard">
-                        <img class="icon" src="/icons/dashboard.png" alt="ダッシュボード" />
+                        <img class="icon" src="../assets/icons/dashboard.png" alt="ダッシュボード" />
                         ダッシュボード
                     </button>
                     <button class="nav-item" data-tab="results">
-                        <img class="icon" src="/icons/result.png" alt="送信結果" />
+                        <img class="icon" src="../assets/icons/result.png" alt="送信結果" />
                         送信結果
                     </button>
                     <button class="nav-item" data-tab="url-list">
-                        <img class="icon" src="/icons/url-list.png" alt="送信先リスト管理" />
+                        <img class="icon" src="../assets/icons/url-list.png" alt="送信先リスト管理" />
                         送信先リスト管理
                     </button>
                     <button class="nav-item" data-tab="profiles">
-                        <img class="icon" src="/icons/profiles.png" alt="フォーム入力データ管理" />
+                        <img class="icon" src="../assets/icons/profiles.png" alt="フォーム入力データ管理" />
                         フォーム入力データ管理
                     </button>
                     <button class="nav-item" data-tab="settings">
-                        <img class="icon" src="/icons/settings.png" alt="設定" />
+                        <img class="icon" src="../assets/icons/settings.png" alt="設定" />
                         設定
                     </button>
                 </nav>
@@ -68,7 +68,7 @@
                         <h2>ダッシュボード</h2>
                         <div class="dashboard-actions">
                             <button id="refreshDashboard" class="refresh-button">
-                                <img class="icon" src="/icons/refresh.png" alt="更新" />
+                                <img class="icon" src="../assets/icons/refresh.png" alt="更新" />
                                 更新
                             </button>
                         </div>
@@ -157,7 +157,7 @@
                             </div>
                             <div class="url-actions-bottom">
                                 <button id="executeFromUrlTab" class="success-button">
-                                    <img class="icon" src="/icons/play.png" alt="送信開始" />
+                                    <img class="icon" src="../assets/icons/play.png" alt="送信開始" />
                                     送信開始
                                 </button>
                             </div>

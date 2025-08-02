@@ -17,7 +17,7 @@ async function returnToMainTab(tabParam = null) {
     try {
         // 既存のメインタブを検索
         const tabs = await chrome.tabs.query({
-            url: chrome.runtime.getURL('main.html') + '*'
+            url: chrome.runtime.getURL('ui/main.html') + '*'
         });
 
         if (tabs.length > 0) {
@@ -26,7 +26,7 @@ async function returnToMainTab(tabParam = null) {
             
             if (tabParam) {
                 await chrome.tabs.update(mainTab.id, {
-                    url: chrome.runtime.getURL('main.html') + tabParam,
+                    url: chrome.runtime.getURL('ui/main.html') + tabParam,
                     active: true
                 });
             } else {
@@ -42,11 +42,11 @@ async function returnToMainTab(tabParam = null) {
             // 既存のメインタブがない場合、新しく作成
             if (tabParam) {
                 chrome.tabs.create({
-                    url: chrome.runtime.getURL('main.html') + tabParam
+                    url: chrome.runtime.getURL('ui/main.html') + tabParam
                 });
             } else {
                 chrome.tabs.create({
-                    url: chrome.runtime.getURL('main.html')
+                    url: chrome.runtime.getURL('ui/main.html')
                 });
             }
 
@@ -60,11 +60,11 @@ async function returnToMainTab(tabParam = null) {
         // エラー時は新しいタブを作成
         if (tabParam) {
             chrome.tabs.create({
-                url: chrome.runtime.getURL('main.html') + tabParam
+                url: chrome.runtime.getURL('ui/main.html') + tabParam
             });
         } else {
             chrome.tabs.create({
-                url: chrome.runtime.getURL('main.html')
+                url: chrome.runtime.getURL('ui/main.html')
             });
         }
     }

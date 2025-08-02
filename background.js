@@ -1,28 +1,120 @@
-// 共通設定のインポート
-import { SUPABASE_CONFIG, createSupabaseClient } from './shared/config.js';
-import { 
-    BATCH_SIZE,
-    BATCH_DELAY, 
-    KEEPALIVE_INTERVAL,
-    URL_PROCESSING_TIMEOUT,
-    FORM_TIMEOUT,
-    SEND_TIMEOUT,
-    RECAPTCHA_TIMEOUT,
-    ACTION_EXPLORE,
-    ACTION_SEND,
-    ACTION_STOP,
-    ACTION_STOP_COMPLETED,
-    ACTION_CONFIRM,
-    ACTION_RECHECK,
-    ACTION_EXECUTE,
-    ERROR_STOP_REQUESTED,
-    TIMEOUT_MESSAGE_TEMPLATE
-} from './shared/constants.js';
-import { ExDB } from './shared/database.js';
+// Service Worker用のSupabase読み込み
+importScripts('supabase/supabase.js');
+
+// Supabase設定
+const SUPABASE_CONFIG = {
+    url: 'https://mqibubhzyvlprhekdjvf.supabase.co',
+    anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1xaWJ1Ymh6eXZscHJoZWtkanZmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDc5MTcyMDgsImV4cCI6MjA2MzQ5MzIwOH0.RsiLZLsbL2A8dbs2e7lmYMl0gzFuvSkq70pdABr2a_I'
+};
+
+// 定数定義
+const BATCH_SIZE = 100;
+const BATCH_DELAY = 30000; // 30秒
+const KEEPALIVE_INTERVAL = 20000; // 20秒
+const URL_PROCESSING_TIMEOUT = 90000; // 90秒
+const FORM_TIMEOUT = 5000; // 5秒
+const SEND_TIMEOUT = 10000; // 10秒
+const RECAPTCHA_TIMEOUT = 40000; // 40秒
+const ACTION_EXPLORE = "explore";
+const ACTION_SEND = "send";
+const ACTION_STOP = "stop";
+const ACTION_STOP_COMPLETED = "stopCompleted";
+const ACTION_CONFIRM = "confirm";
+const ACTION_RECHECK = "recheck";
+const ACTION_EXECUTE = "execute";
+const ERROR_STOP_REQUESTED = 'STOP_REQUESTED';
+const TIMEOUT_MESSAGE_TEMPLATE = (seconds) => `処理タイムアウト（${seconds}秒経過）`;
+
+// Supabaseクライアント作成関数
+function createSupabaseClient() {
+    if (typeof supabase === 'undefined') {
+        throw new Error('Supabase library is not loaded. Make sure to include supabase.js before using this module.');
+    }
+    return supabase.createClient(SUPABASE_CONFIG.url, SUPABASE_CONFIG.anonKey);
+}
+
+// IndexedDB操作クラス（簡略版）
+class ExDB {
+    constructor() {
+        this.db = null;
+        this.dbName = 'SalesBotDB';
+        this.version = 1;
+    }
+
+    async openDB() {
+        return new Promise((resolve, reject) => {
+            const request = indexedDB.open(this.dbName, this.version);
+            
+            request.onerror = () => reject(request.error);
+            request.onsuccess = () => {
+                this.db = request.result;
+                resolve(this.db);
+            };
+            
+            request.onupgradeneeded = (event) => {
+                const db = event.target.result;
+                if (!db.objectStoreNames.contains('todos')) {
+                    const store = db.createObjectStore('todos', { keyPath: 'id', autoIncrement: true });
+                    store.createIndex('title', 'title', { unique: false });
+                    store.createIndex('createdAt', 'createdAt', { unique: false });
+                }
+            };
+        });
+    }
+
+    async addTodo(title, description) {
+        if (!this.db) await this.openDB();
+        
+        const todo = {
+            title,
+            description,
+            results: [],
+            createdAt: new Date().toISOString(),
+            updatedAt: new Date().toISOString()
+        };
+
+        return new Promise((resolve, reject) => {
+            const transaction = this.db.transaction(['todos'], 'readwrite');
+            const store = transaction.objectStore('todos');
+            const request = store.add(todo);
+            
+            request.onsuccess = () => resolve({ id: request.result, ...todo });
+            request.onerror = () => reject(request.error);
+        });
+    }
+
+    async updateTodo(todoId, updateData) {
+        if (!this.db) await this.openDB();
+        
+        return new Promise((resolve, reject) => {
+            const transaction = this.db.transaction(['todos'], 'readwrite');
+            const store = transaction.objectStore('todos');
+            const getRequest = store.get(todoId);
+            
+            getRequest.onsuccess = () => {
+                const todo = getRequest.result;
+                if (todo) {
+                    Object.assign(todo, updateData, { updatedAt: new Date().toISOString() });
+                    const putRequest = store.put(todo);
+                    putRequest.onsuccess = () => resolve(todo);
+                    putRequest.onerror = () => reject(putRequest.error);
+                } else {
+                    reject(new Error('Todo not found'));
+                }
+            };
+            getRequest.onerror = () => reject(getRequest.error);
+        });
+    }
+}
 
 // Supabaseクライアントの初期化
-importScripts('supabase/supabase.js');
-const supabaseClient = createSupabaseClient();
+let supabaseClient = null;
+
+try {
+    supabaseClient = createSupabaseClient();
+} catch (error) {
+    console.error('Failed to initialize Supabase:', error);
+}
 
 // グローバル状態管理
 let keepaliveInterval = null;
@@ -75,9 +167,9 @@ function checkStopped() {
 chrome.action.onClicked.addListener(async (tab) => {
     try {
         const { data: { user } } = await supabaseClient.auth.getUser();
-        chrome.tabs.create({ url: 'main.html' });
+                    chrome.tabs.create({ url: 'ui/main.html' });
     } catch (error) {
-        chrome.tabs.create({ url: 'main.html' });
+                    chrome.tabs.create({ url: 'ui/main.html' });
     }
 });
 
@@ -549,7 +641,7 @@ async function batchBreak(batchNumber, totalBatches, tabId) {
  */
 async function notifyStopCompleted() {
     try {
-        const tabs = await chrome.tabs.query({ url: chrome.runtime.getURL('main.html') });
+        const tabs = await chrome.tabs.query({ url: chrome.runtime.getURL('ui/main.html') });
         for (const tab of tabs) {
             try {
                 await chrome.tabs.sendMessage(tab.id, { action: ACTION_STOP_COMPLETED });
