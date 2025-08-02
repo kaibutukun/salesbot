@@ -1,15 +1,13 @@
+// 共通設定のインポート
+import { SUPABASE_CONFIG, createSupabaseClient } from '../shared/config.js';
+
 document.addEventListener('DOMContentLoaded', function() {
     
     // ====================================
     // Supabase設定とクライアント初期化
     // ====================================
     
-    const supabaseConfig = {
-        url: 'https://mqibubhzyvlprhekdjvf.supabase.co',
-        anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1xaWJ1Ymh6eXZscHJoZWtkanZmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDc5MTcyMDgsImV4cCI6MjA2MzQ5MzIwOH0.RsiLZLsbL2A8dbs2e7lmYMl0gzFuvSkq70pdABr2a_I'
-    };
-    
-    const supabaseClient = supabase.createClient(supabaseConfig.url, supabaseConfig.anonKey);
+    const supabaseClient = createSupabaseClient();
 
     // ====================================
     // デバイスID管理

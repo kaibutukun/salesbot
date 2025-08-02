@@ -1,72 +1,9 @@
+// 共通データベースクラスのインポート
+import { ExDB } from '../shared/database.js';
+
 // ====================================
-// ExDBクラス（IndexedDBラッパー）
+// データベースクラスは shared/database.js からインポート済み
 // ====================================
-
-/**
- * ExDBクラス - IndexedDBを使用したTodo管理データベース
- */
-class ExDB {
-    constructor() {
-        this.dbName = "TodoDatabase";
-        this.dbVersion = 1;
-        this.storeName = "todos";
-    }
-
-    /**
-     * データベースを開く
-     * @returns {Promise<IDBDatabase>} データベースインスタンス
-     */
-    async openDB() {
-        return new Promise((resolve, reject) => {
-            let request = indexedDB.open(this.dbName, this.dbVersion);
-            
-            request.onerror = event => {
-                reject("DBオープンエラー: " + event.target.error);
-            };
-            
-            request.onupgradeneeded = event => {
-                let database = event.target.result;
-                let objectStore = database.createObjectStore(this.storeName, {
-                    keyPath: "id",
-                    autoIncrement: true
-                });
-                objectStore.createIndex("created", "created", { unique: false });
-            };
-            
-            request.onsuccess = event => {
-                resolve(event.target.result);
-            };
-        });
-    }
-
-    /**
-     * 最新のTodoを取得する
-     * @returns {Promise<Object|null>} 最新のTodoオブジェクト
-     */
-    async getLatestTodo() {
-        let database = await this.openDB();
-        
-        return new Promise((resolve, reject) => {
-            let transaction = database.transaction([this.storeName], "readonly");
-            let objectStore = transaction.objectStore(this.storeName);
-            let createdIndex = objectStore.index("created");
-            let cursorRequest = createdIndex.openCursor(null, "prev");
-            
-            cursorRequest.onsuccess = event => {
-                let cursor = event.target.result;
-                if (cursor) {
-                    resolve(cursor.value);
-                } else {
-                    resolve(null);
-                }
-            };
-            
-            cursorRequest.onerror = event => {
-                reject("データ取得エラー: " + event.target.error);
-            };
-        });
-    }
-}
 
 // ====================================
 // 進捗監視機能

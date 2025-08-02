@@ -1,3 +1,10 @@
+// 共通定数のインポート
+import { 
+    ACTION_SEND,
+    WAIT_TIMEOUT,
+    FORM_TIMEOUT 
+} from '../shared/constants.js';
+
 // ====================================
 // Chrome拡張メッセージリスナー
 // ====================================
@@ -87,7 +94,7 @@ async function onExecute(tags) {
                     }
                 } catch (iframeError) {
                     chrome.runtime.sendMessage({
-                        action: "send",
+                        action: ACTION_SEND,
                         success: false,
                         message: "iframe内にフォームがあるため自動入力できません",
                         detail: iframeError.message
@@ -120,7 +127,7 @@ async function onExecute(tags) {
 
             if (salesRefusalElements.length > 0) {
                 chrome.runtime.sendMessage({
-                    action: "send",
+                    action: ACTION_SEND,
                     success: false,
                     message: "営業お断りを検出",
                     detail: ""
@@ -193,7 +200,7 @@ async function onExecute(tags) {
 
         if (textareaTags.length === 0) {
             chrome.runtime.sendMessage({
-                action: "send",
+                action: ACTION_SEND,
                 success: false,
                 message: "問い合わせフォームが見つかりませんでした",
                 detail: "textareaTags.length === 0"
@@ -531,7 +538,7 @@ async function onExecute(tags) {
 
         if (allSubmitButtons.length === 0) {
             chrome.runtime.sendMessage({
-                action: "send",
+                action: ACTION_SEND,
                 success: false,
                 message: "対応できない問い合わせフォームです",
                 detail: "submitButtons.length === 0"
@@ -584,7 +591,7 @@ async function onExecute(tags) {
                 }
 
                 chrome.runtime.sendMessage({ action: "keepalive" });
-                await new Promise(resolve => setTimeout(resolve, 15000));
+                await new Promise(resolve => setTimeout(resolve, WAIT_TIMEOUT));
                 chrome.runtime.sendMessage({ action: "keepalive" });
 
                 // textareaが消えたかチェック
@@ -611,7 +618,7 @@ async function onExecute(tags) {
             if (submitButton) {
                 submitButton.click();
             }
-            await new Promise(resolve => setTimeout(resolve, 5000));
+            await new Promise(resolve => setTimeout(resolve, FORM_TIMEOUT));
         }
 
         // ====================================
@@ -654,7 +661,7 @@ async function onExecute(tags) {
 
             if (confirmButtons.length === 0) {
                 chrome.runtime.sendMessage({
-                    action: "send",
+                    action: ACTION_SEND,
                     success: true,
                     message: "",
                     detail: "buttons.length === 0"
@@ -663,10 +670,10 @@ async function onExecute(tags) {
             }
 
             confirmButtons[confirmButtons.length - 1].click();
-            await new Promise(resolve => setTimeout(resolve, 5000));
+            await new Promise(resolve => setTimeout(resolve, FORM_TIMEOUT));
 
             chrome.runtime.sendMessage({
-                action: "send",
+                action: ACTION_SEND,
                 success: true,
                 message: "",
                 detail: "buttons[buttons.length - 1].click();"
@@ -678,7 +685,7 @@ async function onExecute(tags) {
 
             if (lastTextarea && lastTextarea.value == '') {
                 chrome.runtime.sendMessage({
-                    action: "send",
+                    action: ACTION_SEND,
                     success: true,
                     message: "",
                     detail: "textareaTagAfter.value == ''"
@@ -687,7 +694,7 @@ async function onExecute(tags) {
             }
 
             chrome.runtime.sendMessage({
-                action: "send",
+                action: ACTION_SEND,
                 success: false,
                 message: "対応できない問い合わせフォームです",
                 detail: "textareaTagAfter.value !== ''"
@@ -697,7 +704,7 @@ async function onExecute(tags) {
 
     } catch (error) {
         chrome.runtime.sendMessage({
-            action: "send",
+            action: ACTION_SEND,
             success: false,
             message: "Webサイト解析不可",
             detail: error.message

@@ -14,19 +14,20 @@
     "<all_urls>"
   ],
   "background": {
-    "service_worker": "background.js"
+    "service_worker": "background.js",
+    "type": "module"
   },
   "action": {
     "default_popup": "popup.html",
     "default_icon": {
-      "16": "icons/ポチレターアイコン16.png",
-      "48": "icons/ポチレターアイコン48.png",
-      "128": "icons/ポチレターアイコン128.png"
+      "16": "assets/icons/ポチレターアイコン16.png",
+      "48": "assets/icons/ポチレターアイコン48.png",
+      "128": "assets/icons/ポチレターアイコン128.png"
     }
   },
   "icons": {
-    "16": "icons/ポチレターアイコン16.png",
-    "48": "icons/ポチレターアイコン48.png",
-    "128": "icons/ポチレターアイコン128.png"
+    "16": "assets/icons/ポチレターアイコン16.png",
+    "48": "assets/icons/ポチレターアイコン48.png",
+    "128": "assets/icons/ポチレターアイコン128.png"
   }
 }

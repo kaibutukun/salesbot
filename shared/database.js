@@ -1,8 +1,10 @@
 /**
  * ExDBクラス - IndexedDBを使用したTodo管理データベース
  * 自動お問い合わせ送信ツールのデータ永続化を担当
+ * 
+ * Chrome拡張機能全体で統一使用するためのESモジュール対応版
  */
-class ExDB {
+export class ExDB {
     constructor() {
         this.dbName = "TodoDatabase";
         this.dbVersion = 1;
@@ -214,4 +216,12 @@ class ExDB {
             };
         });
     }
+}
+
+/**
+ * ExDBクラスのシングルトンインスタンスを作成
+ * （必要に応じて使用）
+ */
+export function createDatabase() {
+    return new ExDB();
 }

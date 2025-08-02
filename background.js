@@ -1,18 +1,28 @@
-// Supabase設定
-const supabaseConfig = {
-    url: 'https://mqibubhzyvlprhekdjvf.supabase.co',
-    anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1xaWJ1Ymh6eXZscHJoZWtkanZmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDc5MTcyMDgsImV4cCI6MjA2MzQ5MzIwOH0.RsiLZLsbL2A8dbs2e7lmYMl0gzFuvSkq70pdABr2a_I'
-};
+// 共通設定のインポート
+import { SUPABASE_CONFIG, createSupabaseClient } from './shared/config.js';
+import { 
+    BATCH_SIZE,
+    BATCH_DELAY, 
+    KEEPALIVE_INTERVAL,
+    URL_PROCESSING_TIMEOUT,
+    FORM_TIMEOUT,
+    SEND_TIMEOUT,
+    RECAPTCHA_TIMEOUT,
+    ACTION_EXPLORE,
+    ACTION_SEND,
+    ACTION_STOP,
+    ACTION_STOP_COMPLETED,
+    ACTION_CONFIRM,
+    ACTION_RECHECK,
+    ACTION_EXECUTE,
+    ERROR_STOP_REQUESTED,
+    TIMEOUT_MESSAGE_TEMPLATE
+} from './shared/constants.js';
+import { ExDB } from './shared/database.js';
 
 // Supabaseクライアントの初期化
 importScripts('supabase/supabase.js');
-const supabaseClient = supabase.createClient(supabaseConfig.url, supabaseConfig.anonKey);
-
-// 定数設定
-const BATCH_SIZE = 100;                    // バッチサイズ
-const BATCH_DELAY = 30000;                 // バッチ間の遅延（30秒）
-const KEEPALIVE_INTERVAL = 20000;          // キープアライブ間隔（20秒）
-const URL_PROCESSING_TIMEOUT = 90000;      // URL処理タイムアウト（90秒）
+const supabaseClient = createSupabaseClient();
 
 // グローバル状態管理
 let keepaliveInterval = null;
@@ -38,7 +48,7 @@ function executeStop() {
     isStopping = true;
     activePromiseRejects.forEach(reject => {
         try {
-            reject(new Error('STOP_REQUESTED'));
+            reject(new Error(ERROR_STOP_REQUESTED));
         } catch (e) {
             // エラーを無視
         }
@@ -51,7 +61,7 @@ function executeStop() {
  */
 function checkStopped() {
     if (isStopping) {
-        throw new Error('STOP_REQUESTED');
+        throw new Error(ERROR_STOP_REQUESTED);
     }
 }
 
@@ -71,8 +81,7 @@ chrome.action.onClicked.addListener(async (tab) => {
     }
 });
 
-// 外部データベースモジュールの読み込み
-importScripts('exdb.js');
+// ExDBクラスは shared/database.js からインポート済み
 
 // ====================================
 // ページ操作関連の関数
@@ -95,7 +104,7 @@ async function waitForPageLoad(tabId) {
         // 5秒でタイムアウト
         setTimeout(() => {
             resolve();
-        }, 5000);
+        }, FORM_TIMEOUT);
     });
 }
 
@@ -116,7 +125,7 @@ async function navigateAndExecuteScript(tabId, url, sentUrlList, excludeDomains)
                     url: url,
                     result: "失敗",
                     contact: "",
-                    reason: `処理タイムアウト（${URL_PROCESSING_TIMEOUT / 1000}秒経過）`
+                    reason: TIMEOUT_MESSAGE_TEMPLATE(URL_PROCESSING_TIMEOUT / 1000)
                 });
             }, URL_PROCESSING_TIMEOUT);
         })
@@ -173,7 +182,7 @@ async function executeUrlProcessing(tabId, url, sentUrlList, excludeDomains) {
     // 探索結果を待機
     let exploreResult = await new Promise(resolve => {
         chrome.runtime.onMessage.addListener(function listener(message, sender) {
-            if (sender.tab.id === tabId && message.action === "explore") {
+            if (sender.tab.id === tabId && message.action === ACTION_EXPLORE) {
                 chrome.runtime.onMessage.removeListener(listener);
                 resolve(message);
             }
@@ -186,7 +195,7 @@ async function executeUrlProcessing(tabId, url, sentUrlList, excludeDomains) {
                 contactLink: "",
                 message: "Timeout"
             });
-        }, 5000);
+        }, FORM_TIMEOUT);
     });
 
     let originalResult = exploreResult;
@@ -203,7 +212,7 @@ async function executeUrlProcessing(tabId, url, sentUrlList, excludeDomains) {
 
         exploreResult = await new Promise(resolve => {
             chrome.runtime.onMessage.addListener(function listener(message, sender) {
-                if (sender.tab.id === tabId && message.action === "explore") {
+                if (sender.tab.id === tabId && message.action === ACTION_EXPLORE) {
                     chrome.runtime.onMessage.removeListener(listener);
                     resolve(message);
                 }
@@ -211,7 +220,7 @@ async function executeUrlProcessing(tabId, url, sentUrlList, excludeDomains) {
 
             setTimeout(() => {
                 resolve(originalResult);
-            }, 5000);
+            }, FORM_TIMEOUT);
         });
     }
 
@@ -291,7 +300,7 @@ async function processFormSubmission(tabId, originalUrl, contactUrl, tags) {
                 isRecaptcha: false,
                 message: "Timeout"
             });
-        }, 5000);
+        }, FORM_TIMEOUT);
     });
 
     // 送信スクリプトを実行
@@ -307,14 +316,14 @@ async function processFormSubmission(tabId, originalUrl, contactUrl, tags) {
 
     let sendResult = await new Promise(resolve => {
         chrome.runtime.onMessage.addListener(function listener(message, sender) {
-            if (sender.tab.id === tabId && message.action === "send") {
+            if (sender.tab.id === tabId && message.action === ACTION_SEND) {
                 chrome.runtime.onMessage.removeListener(listener);
                 resolve(message);
             }
         });
 
-        // reCAPTCHAがある場合は40秒、ない場合は10秒でタイムアウト
-        let timeout = recheckResult.isRecaptcha ? 40000 : 10000;
+        // reCAPTCHAがある場合とない場合のタイムアウト設定
+        let timeout = recheckResult.isRecaptcha ? RECAPTCHA_TIMEOUT : SEND_TIMEOUT;
         setTimeout(() => {
             resolve({
                 success: true,
@@ -488,7 +497,7 @@ async function batchBreak(batchNumber, totalBatches, tabId) {
 
     return new Promise((resolve, reject) => {
         if (isStopping) {
-            reject(new Error('STOP_REQUESTED'));
+            reject(new Error(ERROR_STOP_REQUESTED));
             return;
         }
 
@@ -510,7 +519,7 @@ async function batchBreak(batchNumber, totalBatches, tabId) {
         (async () => {
             while (currentIteration < iterations) {
                 if (isStopping) {
-                    wrappedReject(new Error('STOP_REQUESTED'));
+                    wrappedReject(new Error(ERROR_STOP_REQUESTED));
                     return;
                 }
 
@@ -543,7 +552,7 @@ async function notifyStopCompleted() {
         const tabs = await chrome.tabs.query({ url: chrome.runtime.getURL('main.html') });
         for (const tab of tabs) {
             try {
-                await chrome.tabs.sendMessage(tab.id, { action: 'stopCompleted' });
+                await chrome.tabs.sendMessage(tab.id, { action: ACTION_STOP_COMPLETED });
             } catch (error) {
                 // エラーを無視
             }
@@ -562,14 +571,14 @@ async function notifyStopCompleted() {
  */
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // 停止処理
-    if (message.action === "stop") {
+    if (message.action === ACTION_STOP) {
         executeStop();
         sendResponse({ success: true });
         return true;
     }
 
     // 実行処理
-    if (message.action === "execute") {
+    if (message.action === ACTION_EXECUTE) {
         let tabId = message.tabId;
 
         (async () => {
@@ -682,7 +691,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 chrome.tabs.update(tabId, { url: "done.html" });
 
             } catch (error) {
-                if (error.message === 'STOP_REQUESTED') {
+                if (error.message === ERROR_STOP_REQUESTED) {
                     try {
                         // 停止時の後処理
                         const db = new ExDB();

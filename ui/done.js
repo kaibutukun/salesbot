@@ -1,72 +1,9 @@
+// 共通データベースクラスのインポート
+import { ExDB } from '../shared/database.js';
+
 // ====================================
-// IndexedDBデータベース操作クラス
+// データベースクラスは shared/database.js からインポート済み
 // ====================================
-
-/**
- * ExDBクラス - IndexedDBを使用したデータベース操作
- */
-class ExDB {
-    constructor() {
-        this.dbName = "TodoDatabase";
-        this.dbVersion = 1;
-        this.storeName = "todos";
-    }
-
-    /**
-     * データベースを開く
-     * @returns {Promise<IDBDatabase>} データベースインスタンス
-     */
-    async openDB() {
-        return new Promise((resolve, reject) => {
-            let request = indexedDB.open(this.dbName, this.dbVersion);
-
-            request.onerror = event => {
-                reject("DBオープンエラー: " + event.target.error);
-            };
-
-            request.onupgradeneeded = event => {
-                let db = event.target.result;
-                let store = db.createObjectStore(this.storeName, {
-                    keyPath: "id",
-                    autoIncrement: true
-                });
-                store.createIndex("created", "created", { unique: false });
-            };
-
-            request.onsuccess = event => {
-                resolve(event.target.result);
-            };
-        });
-    }
-
-    /**
-     * 最新のTodoを取得する
-     * @returns {Promise<Object|null>} 最新のTodoオブジェクト
-     */
-    async getLatestTodo() {
-        let db = await this.openDB();
-        
-        return new Promise((resolve, reject) => {
-            let transaction = db.transaction([this.storeName], "readonly");
-            let store = transaction.objectStore(this.storeName);
-            let index = store.index("created");
-            let request = index.openCursor(null, "prev");
-
-            request.onsuccess = event => {
-                let cursor = event.target.result;
-                if (cursor) {
-                    resolve(cursor.value);
-                } else {
-                    resolve(null);
-                }
-            };
-
-            request.onerror = event => {
-                reject("データ取得エラー: " + event.target.error);
-            };
-        });
-    }
-}
 
 // ====================================
 // タブ操作関数

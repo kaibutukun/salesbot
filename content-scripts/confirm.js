@@ -1,3 +1,6 @@
+// 共通定数のインポート
+import { ACTION_CONFIRM, FORM_TIMEOUT } from '../shared/constants.js';
+
 // 確認処理を開始
 onExecute();
 
@@ -116,7 +119,7 @@ async function onExecute() {
         targetButton.click();
 
         // 5秒待機（送信処理完了を待つ）
-        await new Promise(resolve => setTimeout(resolve, 5000));
+        await new Promise(resolve => setTimeout(resolve, FORM_TIMEOUT));
 
         // 成功メッセージを送信
         chrome.runtime.sendMessage({

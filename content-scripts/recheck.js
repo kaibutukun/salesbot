@@ -1,3 +1,6 @@
+// 共通定数のインポート
+import { ACTION_RECHECK } from '../shared/constants.js';
+
 // reCAPTCHA確認処理を開始
 onExecute();
 

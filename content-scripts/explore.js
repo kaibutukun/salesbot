@@ -1,3 +1,6 @@
+// 共通定数のインポート
+import { ACTION_EXPLORE } from '../shared/constants.js';
+
 // 探索処理を開始
 onExecute();
 
@@ -68,7 +71,7 @@ async function onExecute() {
         // textareaが見つかった場合は現在のページにフォームありと判定
         if (finalVisibleTextareas.length > 0) {
             chrome.runtime.sendMessage({
-                action: "explore",
+                action: ACTION_EXPLORE,
                 success: true,
                 currentForm: true,
                 contactLink: ""
@@ -129,7 +132,7 @@ async function onExecute() {
                 // 現在のURLと異なり、かつHTTPで始まるリンクを返す
                 if (currentUrl !== contactLink.href && contactLink.href.startsWith('http')) {
                     chrome.runtime.sendMessage({
-                        action: "explore",
+                        action: ACTION_EXPLORE,
                         success: true,
                         currentForm: false,
                         contactLink: contactLink.href
@@ -140,7 +143,7 @@ async function onExecute() {
 
             // 条件に合うリンクが見つからなかった場合
             chrome.runtime.sendMessage({
-                action: "explore",
+                action: ACTION_EXPLORE,
                 success: false,
                 currentForm: false,
                 contactLink: "",
@@ -151,7 +154,7 @@ async function onExecute() {
 
         // コンタクトリンクが全く見つからなかった場合
         chrome.runtime.sendMessage({
-            action: "explore",
+            action: ACTION_EXPLORE,
             success: false,
             currentForm: false,
             contactLink: "",
@@ -161,7 +164,7 @@ async function onExecute() {
     } catch (error) {
         // エラーが発生した場合
         chrome.runtime.sendMessage({
-            action: "explore",
+            action: ACTION_EXPLORE,
             success: false,
             currentForm: false,
             contactLink: "",
