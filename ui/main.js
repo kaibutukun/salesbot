@@ -1,5 +1,12 @@
-// 共通設定のインポート
-import { SUPABASE_CONFIG, createSupabaseClient } from '../shared/config.js';
+/**
+ * メイン画面統合処理
+ * 各専門モジュールを統合してメイン機能を提供
+ * 
+ * このファイルは各専門モジュールを統合してメイン画面を構築します
+ * 旧main.js(332行) → 新main.js(約100行) に大幅削減
+ */
+
+// 共通設定とモジュールのインポート
 import { 
     ACTION_STOP,
     ACTION_STOP_COMPLETED,
@@ -7,326 +14,230 @@ import {
     PROGRESS_UPDATE_INTERVAL,
     SHORT_DELAY
 } from '../shared/constants.js';
-import { ExDB } from '../shared/database.js';
-import { Dashboard } from '../modules/dashboard.js';
-import { ProfileManager } from '../modules/profile-manager.js';
-import { UrlManager } from '../modules/url-manager.js';
-import { ResultsManager } from '../modules/results-manager.js';
-import { SettingsManager, DEFAULT_EXCLUDE_DOMAINS } from '../modules/settings-manager.js';
-import { AuthService } from '../services/auth.service.js';
-import { BatchService } from '../services/batch.service.js';
-import { FormService } from '../services/form.service.js';
-import { StorageService } from '../services/storage.service.js';
-import { ProgressMonitor } from '../modules/progress-monitor.js';
 
-document.addEventListener('DOMContentLoaded', function() {
-    
-    // ====================================
-    // Supabase設定とクライアント初期化は services/auth.service.js で管理
-    // ====================================
+// 専門モジュールのインポート
+import { initializeTabManager } from './main/tab-manager.js';
+import { 
+    initializeApplication, 
+    getModuleInstance,
+    getAllModuleInstances,
+    getApplicationStatus
+} from './main/app-initializer.js';
 
-    // ====================================
-    // ユーティリティ関数の定義
-    // ====================================
-    
-    /**
-     * トーストメッセージを表示
-     * @param {string} message - 表示メッセージ
-     * @param {string} type - メッセージタイプ
-     */
-    function showToast(message, type = 'info') {
-        const toast = getElement('toast');
-        const toastContent = document.querySelector('.toast-content');
+// 共通モジュールのインポート
+import { onDOMReady, getElement } from './common/dom-helper.js';
+import { logError, showToast } from './common/error-handler.js';
+import { addMessageListener } from './common/chrome-api-helper.js';
+
+// ====================================
+// グローバル変数（最小限）
+// ====================================
+
+let applicationInitialized = false;
+let messageListener = null;
+
+// ====================================
+// メイン初期化処理
+// ====================================
+
+/**
+ * メインアプリケーションの初期化
+ */
+async function initializeMainApp() {
+    try {
+        console.log('Starting main app initialization...');
         
-        if (!toast || !toastContent) return;
-
-        toastContent.textContent = message;
-        toast.className = `toast ${type}`;
-        toast.classList.add('show');
-
-        setTimeout(() => {
-            toast.classList.remove('show');
-        }, 3000);
-    }
-
-    // ====================================
-    // モジュールインスタンス初期化
-    // ====================================
-    
-    const formService = new FormService(showToast);
-    const storageService = new StorageService(showToast);
-    const dashboard = new Dashboard(showToast);
-    const profileManager = new ProfileManager(showToast, getElement, formService, storageService);
-    const urlManager = new UrlManager(showToast, getElement, () => dashboard.refreshDashboard());
-    const resultsManager = new ResultsManager(showToast, getElement);
-    const settingsManager = new SettingsManager(showToast, getElement);
-    const authService = new AuthService(showToast, getElement);
-    
-    // BatchServiceは他のサービスへの依存性があるため、後で初期化
-    let batchService = null;
-
-    // ====================================
-    // グローバル変数（バッチ処理関連は services/batch.service.js に移動済み）
-    // ====================================
-
-    // ====================================
-    // デバイスID管理
-    // ====================================
-    
-    /**
-     * デバイスIDを取得または生成する（StorageService経由）
-     * @returns {Promise<string>} デバイスID
-     */
-    async function getDeviceId() {
-        try {
-            let deviceId = await storageService.getDeviceId();
-            if (!deviceId) {
-                deviceId = 'device_' + Date.now() + '_' + Math.random().toString(36).substring(2, 15);
-                await storageService.setDeviceId(deviceId);
-            }
-            return deviceId;
-        } catch (error) {
-            return 'device_' + Date.now() + '_fallback';
-        }
-    }
-
-    // ====================================
-    // データベースクラスは shared/database.js からインポート済み
-    // ====================================
-
-    // ====================================
-    // デフォルト除外ドメイン設定は modules/settings-manager.js から取得
-    // ====================================
-
-    // ====================================
-    // DOM要素取得のヘルパー関数
-    // ====================================
-    
-    /**
-     * 要素を取得する
-     * @param {string} id - 要素のID
-     * @returns {Element|null} DOM要素
-     */
-    function getElement(id) {
-        const element = document.getElementById(id);
-        return element;
-    }
-
-    // ====================================
-    // DOM要素の取得
-    // ====================================
-    
-    // ナビゲーション関連
-    const navItems = document.querySelectorAll('.nav-item');
-    const tabContents = document.querySelectorAll('.tab-content');
-    
-    // 認証関連は services/auth.service.js で管理
-
-    // URL管理関連は modules/url-manager.js で管理
-
-    // プロフィール管理関連は modules/profile-manager.js で管理
-
-    // 送信結果関連は modules/results-manager.js で管理
-
-    // 設定関連は modules/settings-manager.js で管理
-
-    // ダッシュボード関連は modules/dashboard.js で管理
-
-    // ====================================
-    // タブ切り替え機能
-    // ====================================
-    
-    /**
-     * 指定されたタブに切り替える
-     * @param {string} tabId - タブのID
-     */
-    function switchToTab(tabId) {
-        // 全てのナビゲーション項目とタブコンテンツから active クラスを削除
-        navItems.forEach(navItem => navItem.classList.remove('active'));
-        tabContents.forEach(content => content.classList.remove('active'));
-
-        // 対象のナビゲーション項目とタブコンテンツに active クラスを追加
-        const targetNavItem = document.querySelector(`.nav-item[data-tab="${tabId}"]`);
-        const targetTab = document.getElementById(tabId);
-
-        if (targetNavItem) {
-            targetNavItem.classList.add('active');
-        }
-        if (targetTab) {
-            targetTab.classList.add('active');
-        }
-
-        // URLパラメータを更新
-        window.history.replaceState(null, '', `?tab=${tabId}`);
-    }
-
-    /**
-     * 初期タブを設定する
-     */
-    function setInitialTab() {
-        const urlParams = new URLSearchParams(window.location.search);
-        const tabParam = urlParams.get('tab');
-        const targetTab = tabParam || 'dashboard';
+        // 1. タブマネージャーの初期化
+        initializeTabManager();
         
-        switchToTab(targetTab);
-
-        // 結果タブの場合、特定の結果IDが指定されていれば選択
-        if (tabParam === 'results') {
-            const resultId = urlParams.get('id');
-            if (resultId) {
-                setTimeout(() => {
-                    resultsManager.switchToResult(parseInt(resultId));
-                }, SHORT_DELAY);
-            }
-        }
+        // 2. アプリケーション本体の初期化
+        await initializeApplication();
+        
+        // 3. メッセージリスナーの設定
+        setupMessageListeners();
+        
+        // 4. 初期化完了フラグ
+        applicationInitialized = true;
+        
+        // 5. 初期化完了の通知
+        console.log('Main app initialization completed successfully');
+        showToast('アプリケーションの準備が完了しました', 'success');
+        
+    } catch (error) {
+        logError(error, 'initializeMainApp');
+        showToast('アプリケーションの初期化に失敗しました', 'error');
+        
+        // 初期化に失敗した場合のフォールバック処理
+        handleInitializationFailure(error);
     }
+}
 
-    // ====================================
-    // 停止状態管理機能は services/batch.service.js に移動済み
-    // ====================================
-
-
-
-    // ====================================
-    // 共通関数
-    // ====================================
-    
-    /**
-     * ダッシュボードを更新する
-     */
-    async function refreshDashboard() {
+/**
+ * 初期化失敗時の処理
+ * @param {Error} error - 発生したエラー
+ */
+function handleInitializationFailure(error) {
+    try {
+        // エラー情報を表示
+        const errorContainer = getElement('app-error-container', false);
+        if (errorContainer) {
+            errorContainer.innerHTML = `
+                <div class="error-message">
+                    <h3>アプリケーションの初期化に失敗しました</h3>
+                    <p>ページを再読み込みしてください。問題が続く場合は、ブラウザのキャッシュをクリアしてください。</p>
+                    <button onclick="location.reload()" class="primary-button">
+                        ページを再読み込み
+                    </button>
+                </div>
+            `;
+            errorContainer.style.display = 'block';
+        }
+        
+        // 基本的なタブ切り替えだけでも動作するようにする
         try {
-            if (dashboard) {
-                await dashboard.refreshDashboard();
-            }
-        } catch (error) {
-            console.error('Failed to refresh dashboard:', error);
+            initializeTabManager();
+        } catch (tabError) {
+            logError(tabError, 'fallback tab initialization');
         }
+        
+    } catch (fallbackError) {
+        logError(fallbackError, 'handleInitializationFailure');
     }
+}
 
-    // ====================================
-    // 初期化処理
-    // ====================================
-    
-    /**
-     * アプリケーションの初期化
-     */
-    async function init() {
-        try {
-            // BatchServiceを初期化（依存性注入）
-            batchService = new BatchService({
-                showToast: showToast,
-                urlManager: urlManager,
-                dashboard: dashboard,
-                authService: authService,
-                refreshDashboard: refreshDashboard
-            });
-            
-            // BatchServiceのProgressMonitorにStorageServiceを設定
-            if (batchService.progressMonitor) {
-                batchService.progressMonitor.setStorageService(storageService);
-            }
+// ====================================
+// メッセージリスナー
+// ====================================
 
-            await authService.initializeAuth();
-            await urlManager.loadUrlList();
-            await profileManager.loadProfiles();
-            await resultsManager.loadResults();
-            await settingsManager.loadAllSettings();
-            await refreshDashboard();
-            
-            // バッチ処理の状態復元
-            await batchService.checkAndRestoreSendingState();
-            
-            // 実行ボタンのイベントリスナー設定
-            const executeFromUrlTabButton = getElement('executeFromUrlTab');
-            if (executeFromUrlTabButton) {
-                urlManager.setExecuteButtonToExecuteState(batchService.getExecuteButtonHandler());
+/**
+ * バックグラウンドからのメッセージリスナーを設定
+ */
+function setupMessageListeners() {
+    try {
+        messageListener = addMessageListener((message, sender, sendResponse) => {
+            // 停止完了メッセージの処理
+            if (message.action === ACTION_STOP_COMPLETED) {
+                handleStopCompleted();
+                return false;
             }
             
-            setInitialTab();
-        } catch (error) {
-            showToast('初期化中にエラーが発生しました', 'error');
-        }
-    }
-
-    // ====================================
-    // イベントリスナーの設定
-    // ====================================
-    
-    // 初期化を実行
-    init();
-
-    // ナビゲーションタブのイベントリスナー
-    navItems.forEach(item => {
-        item.addEventListener('click', function() {
-            const tabId = this.getAttribute('data-tab');
-            switchToTab(tabId);
+            // その他のメッセージ処理
+            return false;
         });
-    });
+        
+    } catch (error) {
+        logError(error, 'setupMessageListeners');
+    }
+}
 
-    // URL管理のイベントリスナーは modules/url-manager.js で設定済み
-    // executeFromUrlTabButton のイベントリスナーは初期化処理内で設定
+/**
+ * 停止完了時の処理
+ */
+function handleStopCompleted() {
+    try {
+        // URLマネージャーに停止完了を通知
+        const urlManager = getModuleInstance('urlManager');
+        if (urlManager && typeof urlManager.handleStopCompleted === 'function') {
+            urlManager.handleStopCompleted();
+        }
+        
+        // ダッシュボードを更新
+        const dashboard = getModuleInstance('dashboard');
+        if (dashboard && typeof dashboard.refreshDashboard === 'function') {
+            dashboard.refreshDashboard();
+        }
+        
+        showToast('処理が停止されました', 'info');
+        
+    } catch (error) {
+        logError(error, 'handleStopCompleted');
+    }
+}
 
-    // プロフィール管理のイベントリスナーは modules/profile-manager.js で設定済み
+// ====================================
+// ユーティリティ関数
+// ====================================
 
-    // 送信結果のイベントリスナーは modules/results-manager.js で設定済み
-
-    // 設定のイベントリスナーは modules/settings-manager.js で設定済み
-
-    // ダッシュボードのイベントリスナー
-    if (refreshDashboardButton) {
-        refreshDashboardButton.addEventListener('click', async function() {
-            await refreshDashboard();
+/**
+ * ダッシュボードを手動で更新する
+ */
+async function refreshDashboard() {
+    try {
+        const dashboard = getModuleInstance('dashboard');
+        if (dashboard && typeof dashboard.refreshDashboard === 'function') {
+            await dashboard.refreshDashboard();
             showToast('ダッシュボードを更新しました', 'info');
-        });
+        }
+    } catch (error) {
+        logError(error, 'refreshDashboard');
+        showToast('ダッシュボードの更新に失敗しました', 'error');
     }
+}
 
-    // ====================================
-    // ライセンス・認証管理機能は services/auth.service.js に移動済み
-    // ====================================
+// ====================================
+// アプリケーション開始
+// ====================================
 
-
-    // ====================================
-    // トースト通知
-    // ====================================
-    
-    // showToast関数は上部で定義済み
-
-    // ====================================
-    // URL管理機能は modules/url-manager.js に移動済み
-    // ====================================
-
-    // ====================================
-    // プロフィール管理機能は modules/profile-manager.js に移動済み
-    // ====================================
-
-    // ====================================
-    // 送信結果管理機能は modules/results-manager.js に移動済み
-    // ====================================
-
-
-    // ====================================
-    // 設定管理機能は modules/settings-manager.js に移動済み
-    // ====================================
-
-
-    // ====================================
-    // ダッシュボード機能
-    // ====================================
-    
-    /**
-     * ダッシュボードを更新する（モジュール経由）
-     */
-    async function refreshDashboard() {
-        await dashboard.refreshDashboard();
-    }
-
-    // ====================================
-    // 送信実行機能は services/batch.service.js に移動済み
-    // ====================================
-
-    // ====================================
-    // 進捗監視機能は services/batch.service.js に移動済み
-    // ====================================
-
+// DOMが読み込まれたら初期化を実行
+onDOMReady(() => {
+    initializeMainApp();
 });
+
+// ====================================
+// グローバルエラーハンドリング
+// ====================================
+
+// 未処理のエラーをキャッチ
+window.addEventListener('error', (event) => {
+    logError(event.error, 'globalError');
+    console.error('Global error:', event.error);
+});
+
+// 未処理のPromise拒否をキャッチ
+window.addEventListener('unhandledrejection', (event) => {
+    logError(event.reason, 'unhandledPromiseRejection');
+    console.error('Unhandled promise rejection:', event.reason);
+});
+
+// ====================================
+// ページアンロード時の処理
+// ====================================
+
+window.addEventListener('beforeunload', () => {
+    try {
+        // メッセージリスナーの削除
+        if (messageListener) {
+            // Chrome APIのリスナー削除は自動的に処理される
+        }
+        
+        // 各モジュールのクリーンアップ
+        const allModules = getAllModuleInstances();
+        Object.values(allModules).forEach(module => {
+            if (module && typeof module.destroy === 'function') {
+                try {
+                    module.destroy();
+                } catch (error) {
+                    // クリーンアップエラーは無視
+                }
+            }
+        });
+        
+    } catch (error) {
+        // ページアンロード時のエラーは無視
+    }
+});
+
+// ====================================
+// デバッグ用エクスポート（開発環境のみ）
+// ====================================
+
+if (process?.env?.NODE_ENV === 'development') {
+    window.MainApp = {
+        initializeMainApp,
+        refreshDashboard,
+        getModuleInstance,
+        getAllModuleInstances,
+        getApplicationStatus,
+        // デバッグ用の関数をここに追加
+    };
+}

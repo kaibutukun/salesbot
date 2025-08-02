@@ -1,20 +1,26 @@
-// Service Worker用のSupabase読み込み
+// Service Worker用の外部ライブラリとモジュール読み込み
 importScripts('supabase/supabase.js');
 
-// Supabase設定
-const SUPABASE_CONFIG = {
-    url: 'https://mqibubhzyvlprhekdjvf.supabase.co',
-    anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1xaWJ1Ymh6eXZscHJoZWtkanZmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDc5MTcyMDgsImV4cCI6MjA2MzQ5MzIwOH0.RsiLZLsbL2A8dbs2e7lmYMl0gzFuvSkq70pdABr2a_I'
-};
+// 機能別モジュールの読み込み
+importScripts('background/stop-control.js');
+importScripts('background/keepalive.js');
+importScripts('background/time-restriction.js');
+importScripts('background/url-processor.js');
+importScripts('background/form-processor.js');
+importScripts('background/progress-manager.js');
 
-// 定数定義
+// 共有モジュールのService Worker版読み込み
+// TODO: ES6モジュールをService Worker環境で使用するための準備
+// 現在は定数とクラスをインライン定義（後でモジュール化）
+
+// 定数（shared/constants.jsから）
 const BATCH_SIZE = 100;
-const BATCH_DELAY = 30000; // 30秒
-const KEEPALIVE_INTERVAL = 20000; // 20秒
-const URL_PROCESSING_TIMEOUT = 90000; // 90秒
-const FORM_TIMEOUT = 5000; // 5秒
-const SEND_TIMEOUT = 10000; // 10秒
-const RECAPTCHA_TIMEOUT = 40000; // 40秒
+const BATCH_DELAY = 30000;
+// KEEPALIVE_INTERVAL はbackground/keepalive.jsに移動済み
+const URL_PROCESSING_TIMEOUT = 90000;
+const FORM_TIMEOUT = 5000;
+const SEND_TIMEOUT = 10000;
+const RECAPTCHA_TIMEOUT = 40000;
 const ACTION_EXPLORE = "explore";
 const ACTION_SEND = "send";
 const ACTION_STOP = "stop";
@@ -25,7 +31,13 @@ const ACTION_EXECUTE = "execute";
 const ERROR_STOP_REQUESTED = 'STOP_REQUESTED';
 const TIMEOUT_MESSAGE_TEMPLATE = (seconds) => `処理タイムアウト（${seconds}秒経過）`;
 
-// Supabaseクライアント作成関数
+// Supabase設定（shared/config.jsから）
+const SUPABASE_CONFIG = {
+    url: 'https://mqibubhzyvlprhekdjvf.supabase.co',
+    anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1xaWJ1Ymh6eXZscHJoZWtkanZmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDc5MTcyMDgsImV4cCI6MjA2MzQ5MzIwOH0.RsiLZLsbL2A8dbs2e7lmYMl0gzFuvSkq70pdABr2a_I'
+};
+
+// Supabaseクライアント作成関数（shared/config.jsから）
 function createSupabaseClient() {
     if (typeof supabase === 'undefined') {
         throw new Error('Supabase library is not loaded. Make sure to include supabase.js before using this module.');
@@ -33,12 +45,14 @@ function createSupabaseClient() {
     return supabase.createClient(SUPABASE_CONFIG.url, SUPABASE_CONFIG.anonKey);
 }
 
-// IndexedDB操作クラス（簡略版）
+// IndexedDB操作クラス（shared/database.jsと互換性維持のためのService Worker版）
+// TODO: Service Workerでimport対応後、shared/database.jsに統一する
 class ExDB {
     constructor() {
         this.db = null;
-        this.dbName = 'SalesBotDB';
+        this.dbName = 'TodoDatabase';  // shared/database.jsと統一
         this.version = 1;
+        this.storeName = 'todos';
     }
 
     async openDB() {
@@ -53,10 +67,10 @@ class ExDB {
             
             request.onupgradeneeded = (event) => {
                 const db = event.target.result;
-                if (!db.objectStoreNames.contains('todos')) {
-                    const store = db.createObjectStore('todos', { keyPath: 'id', autoIncrement: true });
+                if (!db.objectStoreNames.contains(this.storeName)) {
+                    const store = db.createObjectStore(this.storeName, { keyPath: 'id', autoIncrement: true });
                     store.createIndex('title', 'title', { unique: false });
-                    store.createIndex('createdAt', 'createdAt', { unique: false });
+                    store.createIndex('created', 'created', { unique: false });  // shared/database.jsと統一
                 }
             };
         });
@@ -69,13 +83,15 @@ class ExDB {
             title,
             description,
             results: [],
-            createdAt: new Date().toISOString(),
+            created: new Date(),  // shared/database.jsと統一
+            completed: false,     // shared/database.jsと統一
+            createdAt: new Date().toISOString(),  // 下位互換性のため保持
             updatedAt: new Date().toISOString()
         };
 
         return new Promise((resolve, reject) => {
-            const transaction = this.db.transaction(['todos'], 'readwrite');
-            const store = transaction.objectStore('todos');
+            const transaction = this.db.transaction([this.storeName], 'readwrite');
+            const store = transaction.objectStore(this.storeName);
             const request = store.add(todo);
             
             request.onsuccess = () => resolve({ id: request.result, ...todo });
@@ -87,8 +103,8 @@ class ExDB {
         if (!this.db) await this.openDB();
         
         return new Promise((resolve, reject) => {
-            const transaction = this.db.transaction(['todos'], 'readwrite');
-            const store = transaction.objectStore('todos');
+            const transaction = this.db.transaction([this.storeName], 'readwrite');
+            const store = transaction.objectStore(this.storeName);
             const getRequest = store.get(todoId);
             
             getRequest.onsuccess = () => {
@@ -116,46 +132,33 @@ try {
     console.error('Failed to initialize Supabase:', error);
 }
 
-// グローバル状態管理
-let keepaliveInterval = null;
-let isStopping = false;
-let activePromiseRejects = new Set();
-
 // ====================================
-// 停止処理関連の関数
+// モジュール化された機能へのエイリアス
 // ====================================
 
-/**
- * 停止状態をリセットする
- */
-function resetStopState() {
-    isStopping = false;
-    activePromiseRejects.clear();
-}
+// 停止制御機能
+const resetStopState = globalThis.StopControl.resetStopState;
+const executeStop = globalThis.StopControl.executeStop;
+const checkStopped = globalThis.StopControl.checkStopped;
 
-/**
- * 停止処理を実行する
- */
-function executeStop() {
-    isStopping = true;
-    activePromiseRejects.forEach(reject => {
-        try {
-            reject(new Error(ERROR_STOP_REQUESTED));
-        } catch (e) {
-            // エラーを無視
-        }
-    });
-    activePromiseRejects.clear();
-}
+// キープアライブ機能  
+const startKeepalive = globalThis.Keepalive.startKeepalive;
+const stopKeepalive = globalThis.Keepalive.stopKeepalive;
 
-/**
- * 停止状態をチェックし、停止中の場合はエラーを投げる
- */
-function checkStopped() {
-    if (isStopping) {
-        throw new Error(ERROR_STOP_REQUESTED);
-    }
-}
+// 時間制限機能
+const isTimeRestricted = globalThis.TimeRestriction.isTimeRestricted;
+
+// URL処理機能
+const waitForPageLoad = globalThis.UrlProcessor.waitForPageLoad;
+const navigateAndExecuteScript = globalThis.UrlProcessor.navigateAndExecuteScript;
+const executeUrlProcessing = globalThis.UrlProcessor.executeUrlProcessing;
+
+// フォーム処理機能
+const processFormSubmission = globalThis.FormProcessor.processFormSubmission;
+
+// 進捗管理機能
+const updateProgress = globalThis.ProgressManager.updateProgress;
+const batchBreak = globalThis.ProgressManager.batchBreak;
 
 // ====================================
 // Chrome拡張機能のイベントリスナー
@@ -176,465 +179,31 @@ chrome.action.onClicked.addListener(async (tab) => {
 // ExDBクラスは shared/database.js からインポート済み
 
 // ====================================
-// ページ操作関連の関数
+// モジュール化完了 - 各機能は背景モジュールに移動済み
 // ====================================
+// URL処理: background/url-processor.js
+// フォーム処理: background/form-processor.js  
+// 進捗管理: background/progress-manager.js
 
-/**
- * ページの読み込み完了を待機する
- * @param {number} tabId - タブID
- * @returns {Promise<void>}
- */
-async function waitForPageLoad(tabId) {
-    return new Promise(resolve => {
-        chrome.tabs.onUpdated.addListener(function listener(id, changeInfo) {
-            if (id === tabId && changeInfo.status === 'complete') {
-                chrome.tabs.onUpdated.removeListener(listener);
-                setTimeout(resolve, 1000);
-            }
-        });
-        
-        // 5秒でタイムアウト
-        setTimeout(() => {
-            resolve();
-        }, FORM_TIMEOUT);
-    });
-}
+// navigateAndExecuteScript関数はbackground/url-processor.jsに移動済み
 
-/**
- * URLに移動してスクリプトを実行する（タイムアウト付き）
- * @param {number} tabId - タブID
- * @param {string} url - URL
- * @param {Array} sentUrlList - 送信済みURLリスト
- * @param {Array} excludeDomains - 除外ドメインリスト
- * @returns {Promise<Object>} 処理結果
- */
-async function navigateAndExecuteScript(tabId, url, sentUrlList, excludeDomains) {
-    return Promise.race([
-        executeUrlProcessing(tabId, url, sentUrlList, excludeDomains),
-        new Promise((resolve) => {
-            setTimeout(() => {
-                resolve({
-                    url: url,
-                    result: "失敗",
-                    contact: "",
-                    reason: TIMEOUT_MESSAGE_TEMPLATE(URL_PROCESSING_TIMEOUT / 1000)
-                });
-            }, URL_PROCESSING_TIMEOUT);
-        })
-    ]);
-}
+// executeUrlProcessing関数はbackground/url-processor.jsに移動済み
 
-/**
- * URL処理のメイン処理
- * @param {number} tabId - タブID
- * @param {string} url - URL
- * @param {Array} sentUrlList - 送信済みURLリスト
- * @param {Array} excludeDomains - 除外ドメインリスト
- * @returns {Promise<Object>} 処理結果
- */
-async function executeUrlProcessing(tabId, url, sentUrlList, excludeDomains) {
-    if (isStopping) {
-        return {
-            url: url,
-            result: "停止",
-            contact: "",
-            reason: "ユーザーによって停止されました"
-        };
-    }
+// processFormSubmission関数はbackground/form-processor.jsに移動済み
 
-    // URLとタグを分離
-    let parts = url.split(',');
-    url = parts[0];
-    let tags = parts.slice(1);
-
-    // 除外ドメインチェック
-    if (excludeDomains && excludeDomains.length > 0) {
-        for (let i = 0; i < excludeDomains.length; i++) {
-            if (excludeDomains[i] !== "" && url.includes(excludeDomains[i])) {
-                return {
-                    url: url,
-                    result: "失敗",
-                    contact: "",
-                    reason: "除外ドメインのため送信しない"
-                };
-            }
-        }
-    }
-
-    // ページに移動
-    await chrome.tabs.update(tabId, { url: url });
-    await waitForPageLoad(tabId);
-
-    //探索スクリプトを実行
-    chrome.scripting.executeScript({
-        target: { tabId: tabId },
-        files: ["explore.js"]
-    });
-
-    // 探索結果を待機
-    let exploreResult = await new Promise(resolve => {
-        chrome.runtime.onMessage.addListener(function listener(message, sender) {
-            if (sender.tab.id === tabId && message.action === ACTION_EXPLORE) {
-                chrome.runtime.onMessage.removeListener(listener);
-                resolve(message);
-            }
-        });
-
-        setTimeout(() => {
-            resolve({
-                success: false,
-                currentForm: false,
-                contactLink: "",
-                message: "Timeout"
-            });
-        }, FORM_TIMEOUT);
-    });
-
-    let originalResult = exploreResult;
-
-    // コンタクトリンクが見つかった場合は再度チェック
-    if (exploreResult.success && !exploreResult.currentForm && exploreResult.contactLink) {
-        await chrome.tabs.update(tabId, { url: exploreResult.contactLink });
-        await waitForPageLoad(tabId);
-
-        chrome.scripting.executeScript({
-            target: { tabId: tabId },
-            files: ["explore.js"]
-        });
-
-        exploreResult = await new Promise(resolve => {
-            chrome.runtime.onMessage.addListener(function listener(message, sender) {
-                if (sender.tab.id === tabId && message.action === ACTION_EXPLORE) {
-                    chrome.runtime.onMessage.removeListener(listener);
-                    resolve(message);
-                }
-            });
-
-            setTimeout(() => {
-                resolve(originalResult);
-            }, FORM_TIMEOUT);
-        });
-    }
-
-    let tab = await chrome.tabs.get(tabId);
-    let currentUrl = tab.url;
-
-    if (exploreResult.success) {
-        let contactUrl = exploreResult.currentForm ? currentUrl : exploreResult.contactLink;
-
-        // 除外ドメインチェック（コンタクトURL）
-        if (excludeDomains && excludeDomains.length > 0) {
-            for (let i = 0; i < excludeDomains.length; i++) {
-                if (excludeDomains[i] !== "" && contactUrl.includes(excludeDomains[i])) {
-                    return {
-                        url: url,
-                        result: "失敗",
-                        contact: contactUrl,
-                        reason: "除外ドメインのため送信しない"
-                    };
-                }
-            }
-        }
-
-        // 重複送信チェック
-        if (sentUrlList.includes(contactUrl)) {
-            return {
-                url: url,
-                result: "失敗",
-                contact: contactUrl,
-                reason: "重複送信のため送信しない"
-            };
-        }
-    } else {
-        return {
-            url: url,
-            result: "失敗",
-            contact: "",
-            reason: "問い合わせフォームが見つかりませんでした"
-        };
-    }
-
-    // フォーム送信処理
-    if (exploreResult.currentForm) {
-        return await processFormSubmission(tabId, url, currentUrl, tags);
-    } else {
-        await chrome.tabs.update(tabId, { url: exploreResult.contactLink });
-        await waitForPageLoad(tabId);
-        return await processFormSubmission(tabId, url, exploreResult.contactLink, tags);
-    }
-}
-
-/**
- * フォーム送信処理
- * @param {number} tabId - タブID
- * @param {string} originalUrl - 元のURL
- * @param {string} contactUrl - コンタクトURL
- * @param {Array} tags - タグ
- * @returns {Promise<Object>} 処理結果
- */
-async function processFormSubmission(tabId, originalUrl, contactUrl, tags) {
-    // reCAPTCHAチェック
-    chrome.scripting.executeScript({
-        target: { tabId: tabId },
-        files: ["recheck.js"]
-    });
-
-    let recheckResult = await new Promise(resolve => {
-        chrome.runtime.onMessage.addListener(function listener(message, sender) {
-            if (sender.tab.id === tabId && message.action === "recheck") {
-                chrome.runtime.onMessage.removeListener(listener);
-                resolve(message);
-            }
-        });
-
-        setTimeout(() => {
-            resolve({
-                isRecaptcha: false,
-                message: "Timeout"
-            });
-        }, FORM_TIMEOUT);
-    });
-
-    // 送信スクリプトを実行
-    chrome.scripting.executeScript({
-        target: { tabId: tabId },
-        files: ["send.js"]
-    }, () => {
-        chrome.tabs.sendMessage(tabId, {
-            action: "tags",
-            tags: tags
-        });
-    });
-
-    let sendResult = await new Promise(resolve => {
-        chrome.runtime.onMessage.addListener(function listener(message, sender) {
-            if (sender.tab.id === tabId && message.action === ACTION_SEND) {
-                chrome.runtime.onMessage.removeListener(listener);
-                resolve(message);
-            }
-        });
-
-        // reCAPTCHAがある場合とない場合のタイムアウト設定
-        let timeout = recheckResult.isRecaptcha ? RECAPTCHA_TIMEOUT : SEND_TIMEOUT;
-        setTimeout(() => {
-            resolve({
-                success: true,
-                message: ""
-            });
-        }, timeout);
-    });
-
-    if (!sendResult.success) {
-        return {
-            url: originalUrl,
-            result: "失敗",
-            contact: contactUrl,
-            reason: sendResult.message
-        };
-    }
-
-    // 確認処理
-    await chrome.tabs.get(tabId);
-    chrome.scripting.executeScript({
-        target: { tabId: tabId },
-        files: ["confirm.js"]
-    });
-
-    let confirmResult = await new Promise(resolve => {
-        chrome.runtime.onMessage.addListener(function listener(message, sender) {
-            if (sender.tab.id === tabId && message.action === "confirm") {
-                chrome.runtime.onMessage.removeListener(listener);
-                resolve(message);
-            }
-        });
-
-        setTimeout(() => {
-            resolve({
-                success: true,
-                message: ""
-            });
-        }, 10000);
-    });
-
-    return {
-        url: originalUrl,
-        result: confirmResult.success ? "成功" : "失敗",
-        contact: contactUrl,
-        reason: confirmResult.success ? "成功" : confirmResult.message
-    };
-}
-
-// ====================================
-// 時間制限チェック
-// ====================================
-
-/**
- * 時間制限がかかっているかチェックする
- * @returns {Promise<boolean>} 制限中の場合true
- */
-async function isTimeRestricted() {
-    try {
-        const timeSettingsData = await chrome.storage.sync.get([
-            'enableTimeRestriction',
-            'restrictionStartTime',
-            'restrictionEndTime',
-            'restrictionWeekdays'
-        ]);
-
-        const now = new Date();
-        const currentHour = now.getHours();
-        const currentMinute = now.getMinutes();
-        const currentDay = now.getDay();
-
-        const restrictedWeekdays = timeSettingsData.restrictionWeekdays || [];
-        if (restrictedWeekdays.includes(currentDay)) {
-            return true;
-        }
-
-        if (!timeSettingsData.enableTimeRestriction) {
-            return false;
-        }
-
-        const startTime = timeSettingsData.restrictionStartTime || '22:00';
-        const endTime = timeSettingsData.restrictionEndTime || '08:00';
-
-        const [startHour, startMinute] = startTime.split(':').map(Number);
-        const [endHour, endMinute] = endTime.split(':').map(Number);
-
-        const currentTimeInMinutes = currentHour * 60 + currentMinute;
-        const startTimeInMinutes = startHour * 60 + startMinute;
-        const endTimeInMinutes = endHour * 60 + endMinute;
-
-        if (startTimeInMinutes < endTimeInMinutes) {
-            // 同じ日内（例：09:00-17:00）
-            return currentTimeInMinutes >= startTimeInMinutes && currentTimeInMinutes <= endTimeInMinutes;
-        } else {
-            // 日をまたぐ（例：22:00-08:00）
-            return currentTimeInMinutes >= startTimeInMinutes || currentTimeInMinutes <= endTimeInMinutes;
-        }
-    } catch (error) {
-        return false;
-    }
-}
-
-// ====================================
-// キープアライブ処理
-// ====================================
-
-/**
- * キープアライブを開始する
- */
-function startKeepalive() {
-    if (keepaliveInterval) {
-        clearInterval(keepaliveInterval);
-    }
-    keepaliveInterval = setInterval(() => {
-        // 空の処理でプロセスを維持
-    }, KEEPALIVE_INTERVAL);
-}
-
-/**
- * キープアライブを停止する
- */
-function stopKeepalive() {
-    if (keepaliveInterval) {
-        clearInterval(keepaliveInterval);
-        keepaliveInterval = null;
-    }
-}
+// 重複機能はモジュール化により削除済み
 
 // ====================================
 // 進捗更新処理
 // ====================================
 
-/**
- * 進捗を更新する
- * @param {string} todoId - TodoのID
- * @param {number} urlIndex - URLのインデックス
- * @param {Object} result - 結果オブジェクト
- */
-async function updateProgress(todoId, urlIndex, result) {
-    try {
-        const db = new ExDB();
-        const todo = await db.getTodoById(todoId);
-        
-        if (todo && todo.description && todo.description[urlIndex]) {
-            todo.description[urlIndex] = result;
-            await db.updateTodo(todoId, { description: todo.description });
-        }
-    } catch (error) {
-        // エラーを無視
-    }
-}
+// updateProgress関数はbackground/progress-manager.jsに移動済み
 
 // ====================================
 // バッチ処理の休憩
 // ====================================
 
-/**
- * バッチ間の休憩処理
- * @param {number} batchNumber - バッチ番号
- * @param {number} totalBatches - 総バッチ数
- * @param {number} tabId - タブID
- * @returns {Promise<void>}
- */
-async function batchBreak(batchNumber, totalBatches, tabId) {
-    try {
-        await chrome.tabs.update(tabId, {
-            url: `data:text/html,<html><head><meta charset="UTF-8"><title>処理最適化中...</title><style>body{font-family:sans-serif;text-align:center;padding:50px;background:#f8f9fa;color:#202124;}h1{color:#4285f4;}p{margin:10px 0;}</style></head><body><h1>処理最適化中...</h1><p>サーバー負荷軽減のため少し待機しています</p><p>このページは自動的に閉じられます</p><p>停止ボタンで処理を中断できます</p></body></html>`
-        });
-    } catch (error) {
-        // エラーを無視
-    }
-
-    return new Promise((resolve, reject) => {
-        if (isStopping) {
-            reject(new Error(ERROR_STOP_REQUESTED));
-            return;
-        }
-
-        const iterations = 6;
-        const interval = BATCH_DELAY / iterations;
-        let wrappedReject;
-
-        const originalReject = reject;
-        wrappedReject = (error) => {
-            isStoppedLoop = true;
-            activePromiseRejects.delete(wrappedReject);
-            originalReject(error);
-        };
-
-        activePromiseRejects.add(wrappedReject);
-        let isStoppedLoop = false;
-        let currentIteration = 0;
-
-        (async () => {
-            while (currentIteration < iterations) {
-                if (isStopping) {
-                    wrappedReject(new Error(ERROR_STOP_REQUESTED));
-                    return;
-                }
-
-                await new Promise(r => setTimeout(r, interval));
-                
-                if (isStoppedLoop) return;
-
-                try {
-                    await chrome.storage.local.set({
-                        batchProgress: `${batchNumber}_${currentIteration + 1}_${Date.now()}`
-                    });
-                } catch (keepAliveError) {
-                    // エラーを無視
-                }
-
-                currentIteration++;
-            }
-
-            activePromiseRejects.delete(wrappedReject);
-            resolve();
-        })();
-    });
-}
+// batchBreak関数はbackground/progress-manager.jsに移動済み
 
 /**
  * 停止完了を通知する

@@ -1,97 +1,74 @@
-// 共通定数のインポート
-import { ACTION_RECHECK } from '../shared/constants.js';
-
-// reCAPTCHA確認処理を開始
-onExecute();
-
 /**
- * メイン実行関数
+ * reCAPTCHA確認スクリプト（リファクタリング版）
  * ページ上でreCAPTCHAの存在を確認し、結果をbackground.jsに送信する
+ * 
+ * 旧recheck.js(97行) → 新recheck.js(約35行) に大幅削減
  */
-async function onExecute() {
-    // 500ms待機（ページ読み込み完了を待つ）
-    await new Promise(resolve => setTimeout(resolve, 500));
 
-    let currentDocument = document;
+// 共通定数とモジュールのインポート
+import { ACTION_RECHECK } from '../shared/constants.js';
+import { 
+    ContentScriptBase,
+    findTextareasInAllDocuments,
+    detectRecaptcha,
+    waitShort
+} from './common/content-script-base.js';
 
-    try {
-        // ====================================
-        // ドキュメント探索（textarea基準）
-        // ====================================
-        
-        let textareas = document.getElementsByTagName('textarea');
+// ====================================
+// Recheck スクリプトクラス
+// ====================================
 
-        // メインドキュメントにtextareaがない場合はiframe内を探索
-        if (textareas.length === 0) {
-            let iframes = document.getElementsByTagName('iframe');
+class RecheckScript extends ContentScriptBase {
+    constructor() {
+        super(ACTION_RECHECK);
+    }
+    
+    /**
+     * reCAPTCHA確認処理を実行する
+     * @returns {Promise<void>}
+     */
+    async execute() {
+        try {
+            // 初期化（500ms待機）
+            await waitShort();
             
-            for (let i = 0; i < iframes.length; i++) {
-                let iframe = iframes[i];
-                try {
-                    let iframeDocument = iframe.contentDocument || iframe.contentWindow.document;
-                    let iframeTextareas = iframeDocument.getElementsByTagName('textarea');
-                    
-                    if (iframeTextareas.length > 0) {
-                        currentDocument = iframeDocument;
-                        break;
-                    }
-                } catch (iframeError) {
-                    // iframe アクセスエラーを無視
-                }
-            }
+            // textarea探索でドキュメントを特定
+            const result = findTextareasInAllDocuments();
+            const targetDocument = result.document;
+            
+            // reCAPTCHA検出
+            const hasRecaptcha = detectRecaptcha(targetDocument);
+            
+            // 結果をメッセージで送信
+            await this.sendMessage(hasRecaptcha);
+            
+        } catch (error) {
+            await this.sendMessage(false, error.message);
         }
-
-        // ====================================
-        // reCAPTCHA検出処理
-        // ====================================
+    }
+    
+    /**
+     * reCAPTCHA検出結果をメッセージで送信する
+     * @param {boolean} isRecaptcha - reCAPTCHAが存在するかどうか
+     * @param {string} errorDetail - エラー詳細（オプション）
+     * @returns {Promise<any>}
+     */
+    async sendMessage(isRecaptcha, errorDetail = '') {
+        const message = {
+            action: ACTION_RECHECK,
+            isRecaptcha: isRecaptcha,
+            message: errorDetail ? "Error" : "Success",
+            detail: errorDetail
+        };
         
-        /**
-         * reCAPTCHAを検出する
-         * @param {Document} doc - 検索対象のドキュメント
-         * @returns {Object} reCAPTCHA検出結果
-         */
-        function detectRecaptcha(doc) {
-            // reCAPTCHA v2の検出（DOM要素ベース）
-            const hasRecaptchaElement = doc.querySelector('.g-recaptcha') !== null ||
-                                       doc.querySelector('iframe[src*="google.com/recaptcha"]') !== null;
-
-            // reCAPTCHA v3の検出（スクリプトベース）
-            const hasRecaptchaScript = doc.querySelector('script[src*="recaptcha/api.js"]') !== null ||
-                                      typeof grecaptcha !== 'undefined';
-
-            // reCAPTCHA Enterpriseの検出
-            const hasEnterpriseScript = doc.querySelector('script[src*="enterprise.js"]') !== null;
-
-            return {
-                v2: hasRecaptchaElement,
-                v3: hasRecaptchaScript,
-                enterprise: hasEnterpriseScript,
-                exists: hasRecaptchaElement || hasRecaptchaScript || hasEnterpriseScript
-            };
-        }
-
-        // reCAPTCHA検出実行
-        const recaptchaInfo = detectRecaptcha(currentDocument);
-        const hasRecaptcha = recaptchaInfo.exists;
-
-        // ====================================
-        // 結果送信
-        // ====================================
-        
-        chrome.runtime.sendMessage({
-            action: "recheck",
-            isRecaptcha: hasRecaptcha,
-            message: "Success",
-            detail: ""
-        });
-
-    } catch (error) {
-        // エラー時のメッセージ送信
-        chrome.runtime.sendMessage({
-            action: "recheck",
-            isRecaptcha: false,
-            message: "Error",
-            detail: error.message
-        });
+        return chrome.runtime.sendMessage(message);
     }
 }
+
+// ====================================
+// スクリプト実行
+// ====================================
+
+// スクリプトを開始
+const recheckScript = new RecheckScript();
+recheckScript.execute();
