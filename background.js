@@ -325,7 +325,7 @@ async function executeUrlProcessing(tabId, url, sentUrlList, excludeDomains) {
     await chrome.tabs.update(tabId, { url: url });
     await waitForPageLoad(tabId);
 
-    //探索スクリプトを実行（相対パス修正）
+    //探索スクリプトを実行
     chrome.scripting.executeScript({
         target: { tabId: tabId },
         files: ["content-scripts/explore.js"]
@@ -433,7 +433,7 @@ async function executeUrlProcessing(tabId, url, sentUrlList, excludeDomains) {
  * @returns {Promise<Object>} 処理結果
  */
 async function processFormSubmission(tabId, originalUrl, contactUrl, tags) {
-    // reCAPTCHAチェック（相対パス修正）
+    // reCAPTCHAチェック
     chrome.scripting.executeScript({
         target: { tabId: tabId },
         files: ["content-scripts/recheck.js"]
@@ -455,7 +455,7 @@ async function processFormSubmission(tabId, originalUrl, contactUrl, tags) {
         }, FORM_TIMEOUT);
     });
 
-    // 送信スクリプトを実行（相対パス修正）
+    // 送信スクリプトを実行
     chrome.scripting.executeScript({
         target: { tabId: tabId },
         files: ["content-scripts/send.js"]
@@ -493,7 +493,7 @@ async function processFormSubmission(tabId, originalUrl, contactUrl, tags) {
         };
     }
 
-    // 確認処理（相対パス修正）
+    // 確認処理
     await chrome.tabs.get(tabId);
     chrome.scripting.executeScript({
         target: { tabId: tabId },
@@ -837,7 +837,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                     }
                 }
 
-                // 処理完了
                 await (new ExDB()).updateTodo(latestTodo.id, { completed: true });
                 await notifyStopCompleted();
                 chrome.tabs.update(tabId, { url: "ui/done.html" });

@@ -1,5 +1,5 @@
-// 共通定数のインポート
-import { ACTION_EXPLORE } from '../shared/constants.js';
+// 定数定義（ES6インポートの代替）
+const ACTION_EXPLORE = "explore";
 
 // 探索処理を開始
 onExecute();

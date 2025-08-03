@@ -3,7 +3,7 @@
 <head>
     <meta charset="UTF-8">
     <title>エラーが発生しました - 自動お問い合わせ送信ツール</title>
-    <link rel="stylesheet" href="styles.css">
+    <link rel="stylesheet" href="../assets/styles.css">
 </head>
 
 <body>
@@ -30,26 +30,7 @@
         
     </div>
 
-    <!-- JavaScript処理 -->
-    <script>
-        /**
-         * DOM読み込み完了時の処理
-         */
-        document.addEventListener('DOMContentLoaded', function() {
-            
-            // 再試行ボタンのイベントリスナー
-            document.getElementById('retryButton').addEventListener('click', function() {
-                // 前のページに戻る
-                history.back();
-            });
-
-            // トップに戻るボタンのイベントリスナー
-            document.getElementById('backToMain').addEventListener('click', function() {
-                // メインページに遷移
-                chrome.tabs.update({ url: 'ui/main.html' });
-            });
-            
-        });
-    </script>
+    <!-- 外部JavaScriptファイル読み込み -->
+    <script src="error.js"></script>
 </body>
 </html>

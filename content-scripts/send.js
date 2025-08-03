@@ -1,9 +1,7 @@
-// 共通定数のインポート
-import { 
-    ACTION_SEND,
-    WAIT_TIMEOUT,
-    FORM_TIMEOUT 
-} from '../shared/constants.js';
+// 定数定義（ES6インポートの代替）
+const ACTION_SEND = "send";
+const WAIT_TIMEOUT = 15000; // 15秒
+const FORM_TIMEOUT = 5000; // 5秒
 
 // ====================================
 // Chrome拡張メッセージリスナー

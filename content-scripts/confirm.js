@@ -1,5 +1,6 @@
-// 共通定数のインポート
-import { ACTION_CONFIRM, FORM_TIMEOUT } from '../shared/constants.js';
+// 定数定義（ES6インポートの代替）
+const ACTION_CONFIRM = "confirm";
+const FORM_TIMEOUT = 5000; // 5秒
 
 // 確認処理を開始
 onExecute();
@@ -36,7 +37,7 @@ async function onExecute() {
             // 最後のtextareaに値が入っている場合はエラー
             if (lastTextarea.value !== '') {
                 chrome.runtime.sendMessage({
-                    action: "confirm",
+                    action: ACTION_CONFIRM,
                     success: false,
                     message: "対応できない問い合わせフォームです",
                     detail: "textareaTagAfter.value !== ''"
@@ -106,7 +107,7 @@ async function onExecute() {
         // 送信ボタンが見つからない場合は成功として処理
         if (allSubmitButtons.length === 0) {
             chrome.runtime.sendMessage({
-                action: "confirm",
+                action: ACTION_CONFIRM,
                 success: true,
                 message: "",
                 detail: ""
@@ -123,7 +124,7 @@ async function onExecute() {
 
         // 成功メッセージを送信
         chrome.runtime.sendMessage({
-            action: "confirm",
+            action: ACTION_CONFIRM,
             success: true,
             message: "",
             detail: ""
@@ -132,7 +133,7 @@ async function onExecute() {
     } catch (error) {
         // エラー時のメッセージ送信
         chrome.runtime.sendMessage({
-            action: "confirm",
+            action: ACTION_CONFIRM,
             success: false,
             message: "対応できない問い合わせフォームです",
             detail: error.message

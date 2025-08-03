@@ -1,5 +1,5 @@
-// 共通定数のインポート
-import { ACTION_RECHECK } from '../shared/constants.js';
+// 定数定義（ES6インポートの代替）
+const ACTION_RECHECK = "recheck";
 
 // reCAPTCHA確認処理を開始
 onExecute();
@@ -79,7 +79,7 @@ async function onExecute() {
         // ====================================
         
         chrome.runtime.sendMessage({
-            action: "recheck",
+            action: ACTION_RECHECK,
             isRecaptcha: hasRecaptcha,
             message: "Success",
             detail: ""
@@ -88,7 +88,7 @@ async function onExecute() {
     } catch (error) {
         // エラー時のメッセージ送信
         chrome.runtime.sendMessage({
-            action: "recheck",
+            action: ACTION_RECHECK,
             isRecaptcha: false,
             message: "Error",
             detail: error.message
