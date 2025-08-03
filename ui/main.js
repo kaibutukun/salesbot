@@ -50,6 +50,20 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // ====================================
+    // DOM要素取得のヘルパー関数
+    // ====================================
+    
+    /**
+     * 要素を取得する
+     * @param {string} id - 要素のID
+     * @returns {Element|null} DOM要素
+     */
+    function getElement(id) {
+        const element = document.getElementById(id);
+        return element;
+    }
+
+    // ====================================
     // モジュールインスタンス初期化
     // ====================================
     
@@ -99,26 +113,15 @@ document.addEventListener('DOMContentLoaded', function() {
     // ====================================
 
     // ====================================
-    // DOM要素取得のヘルパー関数
-    // ====================================
-    
-    /**
-     * 要素を取得する
-     * @param {string} id - 要素のID
-     * @returns {Element|null} DOM要素
-     */
-    function getElement(id) {
-        const element = document.getElementById(id);
-        return element;
-    }
-
-    // ====================================
     // DOM要素の取得
     // ====================================
     
     // ナビゲーション関連
     const navItems = document.querySelectorAll('.nav-item');
     const tabContents = document.querySelectorAll('.tab-content');
+    
+    // ダッシュボード関連（エラー修正: refreshDashboardButton の定義追加）
+    const refreshDashboardButton = getElement('refreshDashboard');
     
     // 認証関連は services/auth.service.js で管理
 
@@ -185,8 +188,6 @@ document.addEventListener('DOMContentLoaded', function() {
     // 停止状態管理機能は services/batch.service.js に移動済み
     // ====================================
 
-
-
     // ====================================
     // 共通関数
     // ====================================
@@ -246,6 +247,7 @@ document.addEventListener('DOMContentLoaded', function() {
             setInitialTab();
         } catch (error) {
             showToast('初期化中にエラーが発生しました', 'error');
+            console.error('Initialization error:', error);
         }
     }
 
@@ -273,7 +275,7 @@ document.addEventListener('DOMContentLoaded', function() {
 
     // 設定のイベントリスナーは modules/settings-manager.js で設定済み
 
-    // ダッシュボードのイベントリスナー
+    // ダッシュボードのイベントリスナー（エラー修正: 適切な位置に配置）
     if (refreshDashboardButton) {
         refreshDashboardButton.addEventListener('click', async function() {
             await refreshDashboard();
@@ -284,7 +286,6 @@ document.addEventListener('DOMContentLoaded', function() {
     // ====================================
     // ライセンス・認証管理機能は services/auth.service.js に移動済み
     // ====================================
-
 
     // ====================================
     // トースト通知
@@ -304,22 +305,15 @@ document.addEventListener('DOMContentLoaded', function() {
     // 送信結果管理機能は modules/results-manager.js に移動済み
     // ====================================
 
-
     // ====================================
     // 設定管理機能は modules/settings-manager.js に移動済み
     // ====================================
-
 
     // ====================================
     // ダッシュボード機能
     // ====================================
     
-    /**
-     * ダッシュボードを更新する（モジュール経由）
-     */
-    async function refreshDashboard() {
-        await dashboard.refreshDashboard();
-    }
+    // refreshDashboard関数は上部で定義済み
 
     // ====================================
     // 送信実行機能は services/batch.service.js に移動済み

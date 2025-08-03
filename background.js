@@ -33,7 +33,7 @@ function createSupabaseClient() {
     return supabase.createClient(SUPABASE_CONFIG.url, SUPABASE_CONFIG.anonKey);
 }
 
-// IndexedDB操作クラス（簡略版）
+// IndexedDB操作クラス（Service Worker用完全版）
 class ExDB {
     constructor() {
         this.db = null;
@@ -56,7 +56,7 @@ class ExDB {
                 if (!db.objectStoreNames.contains('todos')) {
                     const store = db.createObjectStore('todos', { keyPath: 'id', autoIncrement: true });
                     store.createIndex('title', 'title', { unique: false });
-                    store.createIndex('createdAt', 'createdAt', { unique: false });
+                    store.createIndex('created', 'created', { unique: false });
                 }
             };
         });
@@ -69,6 +69,8 @@ class ExDB {
             title,
             description,
             results: [],
+            created: new Date(),
+            completed: false,
             createdAt: new Date().toISOString(),
             updatedAt: new Date().toISOString()
         };
@@ -103,6 +105,66 @@ class ExDB {
                 }
             };
             getRequest.onerror = () => reject(getRequest.error);
+        });
+    }
+
+    async getTodoById(todoId) {
+        if (!this.db) await this.openDB();
+        
+        return new Promise((resolve, reject) => {
+            const transaction = this.db.transaction(['todos'], 'readonly');
+            const store = transaction.objectStore('todos');
+            const request = store.get(todoId);
+            
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => reject(request.error);
+        });
+    }
+
+    async getLatestTodo() {
+        if (!this.db) await this.openDB();
+        
+        return new Promise((resolve, reject) => {
+            const transaction = this.db.transaction(['todos'], 'readonly');
+            const store = transaction.objectStore('todos');
+            const index = store.index('created');
+            const request = index.openCursor(null, 'prev');
+            
+            request.onsuccess = (event) => {
+                const cursor = event.target.result;
+                if (cursor) {
+                    resolve(cursor.value);
+                } else {
+                    resolve(null);
+                }
+            };
+            request.onerror = () => reject(request.error);
+        });
+    }
+
+    async getAllTodos() {
+        if (!this.db) await this.openDB();
+        
+        return new Promise((resolve, reject) => {
+            const transaction = this.db.transaction(['todos'], 'readonly');
+            const store = transaction.objectStore('todos');
+            const request = store.getAll();
+            
+            request.onsuccess = () => resolve(request.result);
+            request.onerror = () => reject(request.error);
+        });
+    }
+
+    async deleteTodo(todoId) {
+        if (!this.db) await this.openDB();
+        
+        return new Promise((resolve, reject) => {
+            const transaction = this.db.transaction(['todos'], 'readwrite');
+            const store = transaction.objectStore('todos');
+            const request = store.delete(todoId);
+            
+            request.onsuccess = () => resolve(true);
+            request.onerror = () => reject(request.error);
         });
     }
 }
@@ -167,13 +229,11 @@ function checkStopped() {
 chrome.action.onClicked.addListener(async (tab) => {
     try {
         const { data: { user } } = await supabaseClient.auth.getUser();
-                    chrome.tabs.create({ url: 'ui/main.html' });
+        chrome.tabs.create({ url: 'ui/main.html' });
     } catch (error) {
-                    chrome.tabs.create({ url: 'ui/main.html' });
+        chrome.tabs.create({ url: 'ui/main.html' });
     }
 });
-
-// ExDBクラスは shared/database.js からインポート済み
 
 // ====================================
 // ページ操作関連の関数
@@ -265,10 +325,10 @@ async function executeUrlProcessing(tabId, url, sentUrlList, excludeDomains) {
     await chrome.tabs.update(tabId, { url: url });
     await waitForPageLoad(tabId);
 
-    //探索スクリプトを実行
+    //探索スクリプトを実行（相対パス修正）
     chrome.scripting.executeScript({
         target: { tabId: tabId },
-        files: ["explore.js"]
+        files: ["content-scripts/explore.js"]
     });
 
     // 探索結果を待機
@@ -299,7 +359,7 @@ async function executeUrlProcessing(tabId, url, sentUrlList, excludeDomains) {
 
         chrome.scripting.executeScript({
             target: { tabId: tabId },
-            files: ["explore.js"]
+            files: ["content-scripts/explore.js"]
         });
 
         exploreResult = await new Promise(resolve => {
@@ -373,10 +433,10 @@ async function executeUrlProcessing(tabId, url, sentUrlList, excludeDomains) {
  * @returns {Promise<Object>} 処理結果
  */
 async function processFormSubmission(tabId, originalUrl, contactUrl, tags) {
-    // reCAPTCHAチェック
+    // reCAPTCHAチェック（相対パス修正）
     chrome.scripting.executeScript({
         target: { tabId: tabId },
-        files: ["recheck.js"]
+        files: ["content-scripts/recheck.js"]
     });
 
     let recheckResult = await new Promise(resolve => {
@@ -395,10 +455,10 @@ async function processFormSubmission(tabId, originalUrl, contactUrl, tags) {
         }, FORM_TIMEOUT);
     });
 
-    // 送信スクリプトを実行
+    // 送信スクリプトを実行（相対パス修正）
     chrome.scripting.executeScript({
         target: { tabId: tabId },
-        files: ["send.js"]
+        files: ["content-scripts/send.js"]
     }, () => {
         chrome.tabs.sendMessage(tabId, {
             action: "tags",
@@ -433,11 +493,11 @@ async function processFormSubmission(tabId, originalUrl, contactUrl, tags) {
         };
     }
 
-    // 確認処理
+    // 確認処理（相対パス修正）
     await chrome.tabs.get(tabId);
     chrome.scripting.executeScript({
         target: { tabId: tabId },
-        files: ["confirm.js"]
+        files: ["content-scripts/confirm.js"]
     });
 
     let confirmResult = await new Promise(resolve => {
@@ -678,9 +738,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 resetStopState();
                 startKeepalive();
 
-                // 時間制限チェック
+                // 時間制限チェック（相対パス修正）
                 if (await isTimeRestricted()) {
-                    chrome.tabs.update(tabId, { url: "time_restricted.html" });
+                    chrome.tabs.update(tabId, { url: "ui/time_restricted.html" });
                     stopKeepalive();
                     return;
                 }
@@ -688,7 +748,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 // ライセンスチェック
                 const licenseData = await chrome.storage.sync.get("validLicense");
                 if (!licenseData.validLicense) {
-                    chrome.tabs.update(tabId, { url: "unauthorized.html" });
+                    chrome.tabs.update(tabId, { url: "ui/error.html" });
                     stopKeepalive();
                     return;
                 }
@@ -723,13 +783,13 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 let latestTodo = await (new ExDB()).getLatestTodo();
                 
                 if (!latestTodo || !latestTodo.description || latestTodo.description.length === 0) {
-                    chrome.tabs.update(tabId, { url: "error.html" });
+                    chrome.tabs.update(tabId, { url: "ui/error.html" });
                     stopKeepalive();
                     return;
                 }
 
                 if (latestTodo.completed) {
-                    chrome.tabs.update(tabId, { url: "error.html" });
+                    chrome.tabs.update(tabId, { url: "ui/error.html" });
                     stopKeepalive();
                     return;
                 }
@@ -780,7 +840,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 // 処理完了
                 await (new ExDB()).updateTodo(latestTodo.id, { completed: true });
                 await notifyStopCompleted();
-                chrome.tabs.update(tabId, { url: "done.html" });
+                chrome.tabs.update(tabId, { url: "ui/done.html" });
 
             } catch (error) {
                 if (error.message === ERROR_STOP_REQUESTED) {
@@ -812,9 +872,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                     }
 
                     await notifyStopCompleted();
-                    chrome.tabs.update(tabId, { url: "done.html" });
+                    chrome.tabs.update(tabId, { url: "ui/done.html" });
                 } else {
-                    chrome.tabs.update(tabId, { url: "error.html" });
+                    chrome.tabs.update(tabId, { url: "ui/error.html" });
                 }
             } finally {
                 stopKeepalive();

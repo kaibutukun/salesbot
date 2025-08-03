@@ -192,8 +192,8 @@ export class BatchService {
 
             await this.refreshDashboard();
 
-            // 処理用タブを作成
-            const tab = await chrome.tabs.create({ url: 'process.html' });
+            // 処理用タブを作成（パス修正: process.html → ui/process.html）
+            const tab = await chrome.tabs.create({ url: 'ui/process.html' });
             setTimeout(() => {
                 chrome.runtime.sendMessage({ action: ACTION_EXECUTE, tabId: tab.id });
             }, 1000);
