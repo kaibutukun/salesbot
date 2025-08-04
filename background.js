@@ -37,7 +37,7 @@ function createSupabaseClient() {
 class ExDB {
     constructor() {
         this.db = null;
-        this.dbName = 'SalesBotDB';
+        this.dbName = 'TodoDatabase'; // shared/database.jsと統一
         this.version = 1;
     }
 
@@ -45,18 +45,26 @@ class ExDB {
         return new Promise((resolve, reject) => {
             const request = indexedDB.open(this.dbName, this.version);
             
-            request.onerror = () => reject(request.error);
+            request.onerror = () => {
+                console.error('IndexedDB open error:', request.error);
+                reject(request.error);
+            };
+            
             request.onsuccess = () => {
                 this.db = request.result;
+                console.log('IndexedDB opened successfully:', this.dbName);
                 resolve(this.db);
             };
             
             request.onupgradeneeded = (event) => {
                 const db = event.target.result;
+                console.log('IndexedDB upgrade needed, creating object store');
+                
                 if (!db.objectStoreNames.contains('todos')) {
                     const store = db.createObjectStore('todos', { keyPath: 'id', autoIncrement: true });
                     store.createIndex('title', 'title', { unique: false });
                     store.createIndex('created', 'created', { unique: false });
+                    console.log('Created todos object store with indexes');
                 }
             };
         });
@@ -80,8 +88,14 @@ class ExDB {
             const store = transaction.objectStore('todos');
             const request = store.add(todo);
             
-            request.onsuccess = () => resolve({ id: request.result, ...todo });
-            request.onerror = () => reject(request.error);
+            request.onsuccess = () => {
+                console.log('Todo added successfully with ID:', request.result);
+                resolve({ id: request.result, ...todo });
+            };
+            request.onerror = () => {
+                console.error('Failed to add todo:', request.error);
+                reject(request.error);
+            };
         });
     }
 
@@ -98,13 +112,22 @@ class ExDB {
                 if (todo) {
                     Object.assign(todo, updateData, { updatedAt: new Date().toISOString() });
                     const putRequest = store.put(todo);
-                    putRequest.onsuccess = () => resolve(todo);
-                    putRequest.onerror = () => reject(putRequest.error);
+                    putRequest.onsuccess = () => {
+                        console.log('Todo updated successfully:', todoId);
+                        resolve(todo);
+                    };
+                    putRequest.onerror = () => {
+                        console.error('Failed to update todo:', putRequest.error);
+                        reject(putRequest.error);
+                    };
                 } else {
                     reject(new Error('Todo not found'));
                 }
             };
-            getRequest.onerror = () => reject(getRequest.error);
+            getRequest.onerror = () => {
+                console.error('Failed to get todo for update:', getRequest.error);
+                reject(getRequest.error);
+            };
         });
     }
 
@@ -116,8 +139,14 @@ class ExDB {
             const store = transaction.objectStore('todos');
             const request = store.get(todoId);
             
-            request.onsuccess = () => resolve(request.result);
-            request.onerror = () => reject(request.error);
+            request.onsuccess = () => {
+                console.log('Got todo by ID:', todoId, request.result ? 'found' : 'not found');
+                resolve(request.result);
+            };
+            request.onerror = () => {
+                console.error('Failed to get todo by ID:', request.error);
+                reject(request.error);
+            };
         });
     }
 
@@ -133,12 +162,17 @@ class ExDB {
             request.onsuccess = (event) => {
                 const cursor = event.target.result;
                 if (cursor) {
+                    console.log('Got latest todo:', cursor.value.id);
                     resolve(cursor.value);
                 } else {
+                    console.log('No todos found in database');
                     resolve(null);
                 }
             };
-            request.onerror = () => reject(request.error);
+            request.onerror = () => {
+                console.error('Failed to get latest todo:', request.error);
+                reject(request.error);
+            };
         });
     }
 
@@ -150,8 +184,14 @@ class ExDB {
             const store = transaction.objectStore('todos');
             const request = store.getAll();
             
-            request.onsuccess = () => resolve(request.result);
-            request.onerror = () => reject(request.error);
+            request.onsuccess = () => {
+                console.log('Got all todos, count:', request.result.length);
+                resolve(request.result);
+            };
+            request.onerror = () => {
+                console.error('Failed to get all todos:', request.error);
+                reject(request.error);
+            };
         });
     }
 
@@ -163,8 +203,14 @@ class ExDB {
             const store = transaction.objectStore('todos');
             const request = store.delete(todoId);
             
-            request.onsuccess = () => resolve(true);
-            request.onerror = () => reject(request.error);
+            request.onsuccess = () => {
+                console.log('Todo deleted successfully:', todoId);
+                resolve(true);
+            };
+            request.onerror = () => {
+                console.error('Failed to delete todo:', request.error);
+                reject(request.error);
+            };
         });
     }
 }
@@ -714,6 +760,97 @@ async function notifyStopCompleted() {
     }
 }
 
+/**
+ * データベースから最新のタスクを確実に取得する（リトライ機能付き）
+ * @param {number} maxRetries - 最大リトライ回数
+ * @param {number} newTodoId - 新しく作成されたタスクのID（オプション）
+ * @param {number} taskId - 実際に処理するタスクのID（オプション）
+ * @returns {Promise<Object>} 取得されたタスク
+ */
+async function getLatestTodoWithRetry(maxRetries = 10, newTodoId = null, taskId = null) {
+    let retries = 0;
+    const db = new ExDB();
+    
+    while (retries < maxRetries) {
+        try {
+            let targetTodo = null;
+            
+            console.log(`Database retrieval attempt ${retries + 1}/${maxRetries}`);
+            
+            // 実際に処理するタスクのIDが指定されている場合は、そのタスクを優先取得
+            if (taskId) {
+                try {
+                    targetTodo = await db.getTodoById(taskId);
+                    if (targetTodo && targetTodo.description && targetTodo.description.length > 0) {
+                        console.log(`Retrieved task by specific ID: ${taskId}, URLs: ${targetTodo.description.length}, completed: ${targetTodo.completed}`);
+                        return targetTodo;
+                    }
+                } catch (error) {
+                    console.log(`Failed to get task by specific ID ${taskId}, error:`, error.message);
+                }
+            }
+            
+            // 新しく作成されたタスクのIDが指定されている場合は、そのタスクを優先取得
+            if (newTodoId) {
+                try {
+                    targetTodo = await db.getTodoById(newTodoId);
+                    if (targetTodo && targetTodo.description && targetTodo.description.length > 0) {
+                        console.log(`Retrieved task by new ID: ${newTodoId}, URLs: ${targetTodo.description.length}, completed: ${targetTodo.completed}`);
+                        return targetTodo;
+                    }
+                } catch (error) {
+                    console.log(`Failed to get task by new ID ${newTodoId}, error:`, error.message);
+                }
+            }
+            
+            // IDで取得できない場合は最新を取得
+            try {
+                targetTodo = await db.getLatestTodo();
+                
+                if (targetTodo) {
+                    console.log(`Retrieved latest task: ID ${targetTodo.id}, URLs: ${targetTodo.description?.length || 0}, completed: ${targetTodo.completed}`);
+                    
+                    if (targetTodo.description && targetTodo.description.length > 0) {
+                        return targetTodo;
+                    }
+                } else {
+                    console.log(`No tasks found in database`);
+                }
+            } catch (error) {
+                console.error(`Error getting latest task:`, error.message);
+            }
+            
+            retries++;
+            console.log(`Database retry ${retries}/${maxRetries} - No valid todo found`);
+            
+            // リトライ前に待機時間を徐々に延長
+            const waitTime = Math.min(300 + (retries * 100), 1000);
+            await new Promise(resolve => setTimeout(resolve, waitTime));
+            
+        } catch (error) {
+            console.error(`Database access error on retry ${retries + 1}:`, error);
+            retries++;
+            
+            if (retries < maxRetries) {
+                await new Promise(resolve => setTimeout(resolve, 500));
+            }
+        }
+    }
+    
+    // 最終的に全てのタスクを取得してデバッグ情報を出力
+    try {
+        const allTodos = await db.getAllTodos();
+        console.log(`Failed to retrieve valid todo. Total todos in database: ${allTodos.length}`);
+        allTodos.forEach((todo, index) => {
+            console.log(`Todo ${index + 1}: ID=${todo.id}, URLs=${todo.description?.length || 0}, completed=${todo.completed}`);
+        });
+    } catch (error) {
+        console.error('Failed to get debug info:', error);
+    }
+    
+    throw new Error(`Failed to retrieve todo after ${maxRetries} retries`);
+}
+
 // ====================================
 // メッセージリスナー
 // ====================================
@@ -732,25 +869,59 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // 実行処理
     if (message.action === ACTION_EXECUTE) {
         let tabId = message.tabId;
+        let newTodoId = message.newTodoId; // 新しく作成されたタスクのID
+        let taskId = message.taskId; // 実際に処理するタスクのID
 
         (async () => {
             try {
+                console.log('=== BATCH EXECUTION START ===');
+                console.log('Parameters:', { tabId, newTodoId, taskId });
                 resetStopState();
                 startKeepalive();
 
+                // データベースの初期化
+                console.log('Initializing database in background script...');
+                const db = new ExDB();
+                try {
+                    await db.openDB();
+                    console.log('Database initialized successfully in background');
+                } catch (dbError) {
+                    console.error('Database initialization failed in background:', dbError);
+                    chrome.tabs.update(tabId, { url: "ui/error.html" });
+                    stopKeepalive();
+                    return;
+                }
+
                 // 時間制限チェック（相対パス修正）
                 if (await isTimeRestricted()) {
+                    console.log('Time restricted, redirecting to restriction page');
                     chrome.tabs.update(tabId, { url: "ui/time_restricted.html" });
                     stopKeepalive();
                     return;
                 }
 
-                // ライセンスチェック
+                // ライセンスチェック（強化版）
                 const licenseData = await chrome.storage.sync.get("validLicense");
                 if (!licenseData.validLicense) {
+                    console.log('Invalid license, redirecting to error page');
                     chrome.tabs.update(tabId, { url: "ui/error.html" });
                     stopKeepalive();
                     return;
+                }
+                console.log('License valid, proceeding');
+
+                // データベース状態の詳細確認
+                let allTodos = [];
+                try {
+                    allTodos = await db.getAllTodos();
+                    console.log(`=== DATABASE STATE ===`);
+                    console.log(`Total todos in database: ${allTodos.length}`);
+                    allTodos.forEach((todo, index) => {
+                        console.log(`Todo ${index + 1}: ID=${todo.id}, title="${todo.title}", URLs=${todo.description?.length || 0}, completed=${todo.completed}, created=${todo.created}`);
+                    });
+                    console.log(`=== END DATABASE STATE ===`);
+                } catch (error) {
+                    console.error('Failed to get database state:', error);
                 }
 
                 // 除外ドメインの取得
@@ -779,16 +950,33 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                     self.indexOf(value) === index
                 );
 
-                // 最新のTodoを取得
-                let latestTodo = await (new ExDB()).getLatestTodo();
-                
-                if (!latestTodo || !latestTodo.description || latestTodo.description.length === 0) {
+                // 最新のTodoを取得（リトライ機能付き）
+                let latestTodo;
+                try {
+                    console.log('Attempting to get todo for processing...');
+                    latestTodo = await getLatestTodoWithRetry(10, newTodoId, taskId);
+                } catch (error) {
+                    console.error('Failed to get latest todo:', error);
+                    
+                    // データベースが空の場合の詳細診断
+                    if (allTodos.length === 0) {
+                        console.error('=== CRITICAL: Database is completely empty ===');
+                        console.error('This suggests that:');
+                        console.error('1. URL list was not saved properly');
+                        console.error('2. Task creation failed in batch.service.js');
+                        console.error('3. Database initialization failed');
+                        console.error('4. Different database instances are being used');
+                    }
+                    
                     chrome.tabs.update(tabId, { url: "ui/error.html" });
                     stopKeepalive();
                     return;
                 }
+                
+                console.log(`Processing todo: ${latestTodo.id}, URLs: ${latestTodo.description.length}, completed: ${latestTodo.completed}, title: "${latestTodo.title}"`);
 
                 if (latestTodo.completed) {
+                    console.log('Todo is already completed, redirecting to error page');
                     chrome.tabs.update(tabId, { url: "ui/error.html" });
                     stopKeepalive();
                     return;
@@ -797,6 +985,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 let urlList = latestTodo.description;
                 const totalUrls = urlList.length;
 
+                console.log(`Starting batch processing for ${totalUrls} URLs`);
+
                 // バッチ処理
                 for (let batchStart = 0; batchStart < totalUrls; batchStart += BATCH_SIZE) {
                     checkStopped();
@@ -804,6 +994,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                     const batchEnd = Math.min(batchStart + BATCH_SIZE, totalUrls);
                     const currentBatch = Math.floor(batchStart / BATCH_SIZE) + 1;
                     const totalBatches = Math.ceil(totalUrls / BATCH_SIZE);
+
+                    console.log(`Processing batch ${currentBatch}/${totalBatches} (URLs ${batchStart + 1}-${batchEnd})`);
 
                     // バッチ内のURL処理
                     for (let i = batchStart; i < batchEnd; i++) {
@@ -823,6 +1015,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                             };
                         }
 
+                        console.log(`URL ${i + 1}/${totalUrls}: ${result.result} - ${currentUrl}`);
                         await updateProgress(latestTodo.id, i, result);
 
                         // 成功した場合は送信済みリストに追加
@@ -833,20 +1026,35 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
                     // 最後のバッチでない場合は休憩
                     if (batchEnd < totalUrls) {
+                        console.log(`Batch ${currentBatch} completed, taking break...`);
                         await batchBreak(currentBatch, totalBatches, tabId);
                     }
                 }
 
+                console.log('All batches completed, finalizing...');
                 await (new ExDB()).updateTodo(latestTodo.id, { completed: true });
                 await notifyStopCompleted();
                 chrome.tabs.update(tabId, { url: "ui/done.html" });
 
             } catch (error) {
+                console.error('Batch execution error:', error);
+                
                 if (error.message === ERROR_STOP_REQUESTED) {
+                    console.log('Processing stopped by user');
                     try {
                         // 停止時の後処理
                         const db = new ExDB();
-                        const latestTodo = await db.getLatestTodo();
+                        let latestTodo;
+                        
+                        try {
+                            latestTodo = await getLatestTodoWithRetry(3, newTodoId, taskId);
+                        } catch (getError) {
+                            console.error('Failed to get todo for cleanup:', getError);
+                            // 取得できない場合はスキップ
+                            await notifyStopCompleted();
+                            chrome.tabs.update(tabId, { url: "ui/done.html" });
+                            return;
+                        }
                         
                         if (latestTodo && !latestTodo.completed) {
                             const urlList = latestTodo.description;
@@ -867,12 +1075,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                             await db.updateTodo(latestTodo.id, { completed: true });
                         }
                     } catch (stopError) {
+                        console.error('Stop cleanup error:', stopError);
                         // エラーを無視
                     }
 
                     await notifyStopCompleted();
                     chrome.tabs.update(tabId, { url: "ui/done.html" });
                 } else {
+                    console.log('Unexpected error, redirecting to error page');
                     chrome.tabs.update(tabId, { url: "ui/error.html" });
                 }
             } finally {
