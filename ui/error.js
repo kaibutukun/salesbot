@@ -21,8 +21,8 @@ document.addEventListener('DOMContentLoaded', function() {
     const backToMainButton = document.getElementById('backToMain');
     if (backToMainButton) {
         backToMainButton.addEventListener('click', function() {
-            // メインページに遷移（Chrome拡張機能内のページ遷移）
-            window.location.href = 'main.html';
+            // Chrome拡張機能内のページ遷移
+            chrome.tabs.update({ url: 'ui/main.html' });
         });
     }
     
