@@ -56,8 +56,6 @@ export class BatchService {
     showToast(message, type = 'info') {
         if (this.showToastFunction) {
             this.showToastFunction(message, type);
-        } else {
-            console.log(`Toast: ${message} (${type})`);
         }
     }
 
@@ -117,71 +115,11 @@ export class BatchService {
     }
 
     /**
-     * データベース書き込み完了を確実に待機する
-     * @param {ExDB} db - データベースインスタンス
-     * @param {number} newTodoId - 新しく作成されたTodoのID
-     * @param {number} expectedLength - 期待するURL数
-     * @param {number} maxRetries - 最大リトライ回数
-     * @returns {Promise<Object>} 作成されたTodo
-     */
-    async waitForDatabaseWrite(db, newTodoId, expectedLength, maxRetries = 15) {
-        let retries = 0;
-        while (retries < maxRetries) {
-            try {
-                // 少し待機してからチェック
-                await new Promise(resolve => setTimeout(resolve, 150));
-                
-                let targetTodo = null;
-                
-                // まず、指定されたIDで取得を試行
-                if (newTodoId) {
-                    try {
-                        targetTodo = await db.getTodoById(newTodoId);
-                        console.log(`Attempt ${retries + 1}: Checking todo by ID ${newTodoId}:`, targetTodo ? 'found' : 'not found');
-                    } catch (error) {
-                        console.log(`Attempt ${retries + 1}: Error getting todo by ID:`, error.message);
-                    }
-                }
-                
-                // IDで取得できない場合は最新を取得
-                if (!targetTodo) {
-                    try {
-                        targetTodo = await db.getLatestTodo();
-                        console.log(`Attempt ${retries + 1}: Checking latest todo:`, targetTodo ? `found (ID: ${targetTodo.id})` : 'not found');
-                    } catch (error) {
-                        console.log(`Attempt ${retries + 1}: Error getting latest todo:`, error.message);
-                    }
-                }
-                
-                if (targetTodo && 
-                    targetTodo.description && 
-                    targetTodo.description.length === expectedLength &&
-                    !targetTodo.completed) {
-                    
-                    console.log(`Database write confirmed: ID ${targetTodo.id}, URLs: ${targetTodo.description.length}`);
-                    return targetTodo;
-                }
-                
-                retries++;
-                console.log(`Database write check retry ${retries}/${maxRetries} - Expected ${expectedLength} URLs, found: ${targetTodo?.description?.length || 0}`);
-                
-            } catch (error) {
-                console.error(`Database write check error on retry ${retries + 1}:`, error);
-                retries++;
-            }
-        }
-        
-        throw new Error(`Database write confirmation failed after ${maxRetries} retries`);
-    }
-
-    /**
      * 実行ボタンのイベントハンドラー
      */
     async executeButtonHandler() {
         try {
-            console.log('Execute button handler started');
-            
-            // ライセンス確認（強化版）
+            // ライセンス確認
             if (this.authService) {
                 const isLicenseValid = await this.authService.isLicenseValid();
                 if (!isLicenseValid) {
@@ -199,27 +137,11 @@ export class BatchService {
 
             // データベースの初期化と確認
             const db = new ExDB();
-            console.log('Initializing database...');
-            
             try {
                 await db.openDB();
-                console.log('Database initialized successfully');
             } catch (dbError) {
-                console.error('Database initialization failed:', dbError);
                 this.showToast('データベースの初期化に失敗しました', 'error');
                 return;
-            }
-
-            // 現在のデータベース状態を確認
-            let allTodos = [];
-            try {
-                allTodos = await db.getAllTodos();
-                console.log(`Current database state: ${allTodos.length} todos found`);
-                allTodos.forEach((todo, index) => {
-                    console.log(`Todo ${index + 1}: ID=${todo.id}, URLs=${todo.description?.length || 0}, completed=${todo.completed}, title="${todo.title}"`);
-                });
-            } catch (error) {
-                console.error('Failed to get all todos:', error);
             }
 
             // URLリストの確認と保存
@@ -234,31 +156,19 @@ export class BatchService {
                 
                 // 現在のURLリストを取得
                 urlsToProcess = this.urlManager.getCurrentUrls();
-                console.log(`URLs from URL manager: ${urlsToProcess.length}`);
                 
                 // URLリストが入力されているが保存されていない場合は自動保存
                 if (urlsToProcess.length > 0) {
-                    console.log('Auto-saving URL list before execution');
                     await this.urlManager.saveUrlList();
-                    
-                    // 保存後に少し待機
                     await new Promise(resolve => setTimeout(resolve, 500));
                 }
             }
 
-            // 最新のTodoを再取得
-            let latestTodo = null;
-            try {
-                latestTodo = await db.getLatestTodo();
-                console.log('Latest todo after URL save:', latestTodo ? `ID=${latestTodo.id}, URLs=${latestTodo.description?.length || 0}` : 'null');
-            } catch (error) {
-                console.error('Failed to get latest todo after URL save:', error);
-            }
+            // 最新のTodoを取得
+            let latestTodo = await db.getLatestTodo();
 
             // タスクが存在しない場合は手動で作成
             if (!latestTodo) {
-                console.log('No tasks found, creating new task manually');
-                
                 if (urlsToProcess.length === 0) {
                     this.showToast('URLリストが設定されていません', 'warning');
                     return;
@@ -273,19 +183,8 @@ export class BatchService {
                     reason: ''
                 }));
                 
-                try {
-                    const newTodoResult = await db.addTodo(title, description);
-                    const newTodoId = newTodoResult.id || newTodoResult;
-                    console.log('Manually created task with ID:', newTodoId);
-                    
-                    // 作成されたタスクを取得
-                    latestTodo = await db.getTodoById(newTodoId);
-                    console.log('Retrieved manually created task:', latestTodo ? 'success' : 'failed');
-                } catch (createError) {
-                    console.error('Failed to manually create task:', createError);
-                    this.showToast('タスクの作成に失敗しました', 'error');
-                    return;
-                }
+                const newTodoResult = await db.addTodo(title, description);
+                latestTodo = await db.getTodoById(newTodoResult.id || newTodoResult);
             }
 
             if (!latestTodo || !latestTodo.description || latestTodo.description.length === 0) {
@@ -305,14 +204,8 @@ export class BatchService {
                 return;
             }
 
-            let newTodoId = null;
-            let expectedUrlCount = latestTodo.description.length;
-            let taskToProcess = latestTodo;
-
             // 新しいタスクを作成（完了済みの場合）
             if (latestTodo.completed) {
-                console.log('Creating new task from completed todo');
-                
                 const now = new Date();
                 const title = now.toLocaleString('ja-JP');
                 const newDescription = latestTodo.description.map(item => ({
@@ -322,23 +215,10 @@ export class BatchService {
                     reason: ''
                 }));
                 
-                try {
-                    // 新しいタスクを作成
-                    const newTodoResult = await db.addTodo(title, newDescription);
-                    newTodoId = newTodoResult.id || newTodoResult;
-                    console.log('New task created with ID:', newTodoId);
-                    
-                    // データベース書き込み完了を確実に待機
-                    taskToProcess = await this.waitForDatabaseWrite(db, newTodoId, expectedUrlCount);
-                    console.log('Database write confirmed, proceeding with execution');
-                    
-                } catch (error) {
-                    console.error('Failed to create or verify new task:', error);
-                    this.showToast('新しいタスクの作成に失敗しました', 'error');
-                    return;
-                }
-            } else {
-                console.log('Using existing incomplete task:', latestTodo.id);
+                await db.addTodo(title, newDescription);
+                
+                // 新しいタスクの書き込み完了を待機
+                await new Promise(resolve => setTimeout(resolve, 1000));
             }
 
             // 送信進行状態を設定
@@ -360,25 +240,21 @@ export class BatchService {
 
             await this.refreshDashboard();
 
-            // 処理用タブを作成（パス修正: process.html → ui/process.html）
+            // 処理用タブを作成
             const tab = await chrome.tabs.create({ url: 'ui/process.html' });
             
             // 確実にタブが作成されるまで待機
             await new Promise(resolve => setTimeout(resolve, 1500));
             
             // バックグラウンドスクリプトに実行メッセージを送信
-            console.log('Sending execute message to background script');
             chrome.runtime.sendMessage({ 
                 action: ACTION_EXECUTE, 
-                tabId: tab.id,
-                newTodoId: newTodoId, // 新しく作成したタスクのIDを渡す
-                taskId: taskToProcess.id // 実際に処理するタスクのIDも渡す
+                tabId: tab.id
             });
 
             this.showToast('送信を開始しました', 'success');
             
         } catch (error) {
-            console.error('Execute button handler error:', error);
             this.showToast('送信開始に失敗しました: ' + error.message, 'error');
             
             // エラー時は状態をリセット
@@ -510,7 +386,6 @@ export class BatchService {
             }
         } catch (error) {
             // エラーが発生しても監視は継続
-            console.error('Progress update callback failed:', error);
         }
     }
 
@@ -609,7 +484,6 @@ export class BatchService {
                 });
             });
         } catch (error) {
-            console.error('Failed to stop batch:', error);
             return false;
         }
     }
@@ -624,7 +498,6 @@ export class BatchService {
 
             // 状態をリセット
             this.isStopButtonActive = false;
-            this.lastProgressState.isCompleted = false;
 
             // ストレージをクリア
             chrome.storage.local.remove('sendingInProgress');
@@ -644,7 +517,6 @@ export class BatchService {
 
             this.showToast('バッチ処理状態をリセットしました', 'info');
         } catch (error) {
-            console.error('Failed to reset batch state:', error);
             this.showToast('状態リセットに失敗しました', 'error');
         }
     }

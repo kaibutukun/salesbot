@@ -618,61 +618,29 @@ async function notifyStopCompleted() {
 }
 
 // 最新タスク取得（リトライ機能付き）
-async function getLatestTodoWithRetry(maxRetries = 10, newTodoId = null, taskId = null) {
-    let retries = 0;
+async function getLatestTodo(maxRetries = 3) {
     const db = new ExDB();
     
-    while (retries < maxRetries) {
+    for (let retry = 0; retry < maxRetries; retry++) {
         try {
-            await new Promise(resolve => setTimeout(resolve, 150));
+            await new Promise(resolve => setTimeout(resolve, 200));
             
-            let targetTodo = null;
-            
-            if (taskId) {
-                try {
-                    targetTodo = await db.getTodoById(taskId);
-                    if (targetTodo && targetTodo.description && targetTodo.description.length > 0) {
-                        return targetTodo;
-                    }
-                } catch (error) {
-                    // エラーを無視
-                }
+            const latestTodo = await db.getLatestTodo();
+            if (latestTodo && latestTodo.description && latestTodo.description.length > 0) {
+                return latestTodo;
             }
             
-            if (newTodoId) {
-                try {
-                    targetTodo = await db.getTodoById(newTodoId);
-                    if (targetTodo && targetTodo.description && targetTodo.description.length > 0) {
-                        return targetTodo;
-                    }
-                } catch (error) {
-                    // エラーを無視
-                }
-            }
-            
-            try {
-                targetTodo = await db.getLatestTodo();
-                
-                if (targetTodo && targetTodo.description && targetTodo.description.length > 0) {
-                    return targetTodo;
-                }
-            } catch (error) {
-                // エラーを無視
-            }
-            
-            retries++;
-            const waitTime = Math.min(300 + (retries * 100), 1000);
-            await new Promise(resolve => setTimeout(resolve, waitTime));
-            
-        } catch (error) {
-            retries++;
-            if (retries < maxRetries) {
+            if (retry < maxRetries - 1) {
                 await new Promise(resolve => setTimeout(resolve, 500));
+            }
+        } catch (error) {
+            if (retry === maxRetries - 1) {
+                throw error;
             }
         }
     }
     
-    throw new Error(`Failed to retrieve todo after ${maxRetries} retries`);
+    return null;
 }
 
 // Chrome拡張機能メッセージリスナー
@@ -687,8 +655,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
     // 実行処理
     if (message.action === ACTION_EXECUTE) {
         let tabId = message.tabId;
-        let newTodoId = message.newTodoId;
-        let taskId = message.taskId;
 
         (async () => {
             try {
@@ -729,7 +695,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 let sentUrlList = [];
 
                 if (duplicateData && duplicateData.DoNotDuplicateSend) {
-                    let todos = await (new ExDB()).getAllTodos();
+                    let todos = await db.getAllTodos();
                     for (let i = 0; i < todos.length; i++) {
                         if (todos[i].completed) {
                             for (let j = 0; j < todos[i].description.length; j++) {
@@ -749,8 +715,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 // 最新Todo取得
                 let latestTodo;
                 try {
-                    latestTodo = await getLatestTodoWithRetry(10, newTodoId, taskId);
+                    latestTodo = await getLatestTodo();
                 } catch (error) {
+                    chrome.tabs.update(tabId, { url: "ui/error.html" });
+                    stopKeepalive();
+                    return;
+                }
+
+                if (!latestTodo) {
                     chrome.tabs.update(tabId, { url: "ui/error.html" });
                     stopKeepalive();
                     return;
@@ -806,7 +778,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 }
 
                 // 完了処理
-                await (new ExDB()).updateTodo(latestTodo.id, { completed: true });
+                await db.updateTodo(latestTodo.id, { completed: true });
                 await notifyStopCompleted();
                 chrome.tabs.update(tabId, { url: "ui/done.html" });
 
@@ -818,7 +790,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                         let latestTodo;
                         
                         try {
-                            latestTodo = await getLatestTodoWithRetry(3, newTodoId, taskId);
+                            latestTodo = await getLatestTodo();
                         } catch (getError) {
                             await notifyStopCompleted();
                             chrome.tabs.update(tabId, { url: "ui/done.html" });
