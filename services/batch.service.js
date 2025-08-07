@@ -28,6 +28,7 @@ export class BatchService {
 
         // Chrome runtime listener reference
         this.stopStateListener = null;
+        this.listenerAttached = false;
 
         // ProgressMonitorインスタンスを作成
         this.progressMonitor = new ProgressMonitor({
@@ -69,12 +70,18 @@ export class BatchService {
     }
 
     /**
-     * 停止状態リスナーを設定する
+     * 停止状態リスナーを設定する（修正版）
      */
     setupStopStateListener() {
         // 既存のリスナーを削除
-        if (this.stopStateListener && chrome.runtime.onMessage.hasListener) {
-            chrome.runtime.onMessage.removeListener(this.stopStateListener);
+        if (this.stopStateListener && this.listenerAttached) {
+            try {
+                chrome.runtime.onMessage.removeListener(this.stopStateListener);
+                this.listenerAttached = false;
+            } catch (error) {
+                // リスナーが存在しない場合のエラーを無視
+                console.warn('Failed to remove existing listener:', error.message);
+            }
         }
 
         this.stopStateListener = (message, sender, sendResponse) => {
@@ -89,7 +96,12 @@ export class BatchService {
             }
         };
 
-        chrome.runtime.onMessage.addListener(this.stopStateListener);
+        try {
+            chrome.runtime.onMessage.addListener(this.stopStateListener);
+            this.listenerAttached = true;
+        } catch (error) {
+            console.error('Failed to add stop state listener:', error);
+        }
     }
 
     /**
@@ -529,8 +541,13 @@ export class BatchService {
         this.stopProgressMonitoring();
 
         // Chrome runtime listenerを削除
-        if (this.stopStateListener && chrome.runtime.onMessage.hasListener) {
-            chrome.runtime.onMessage.removeListener(this.stopStateListener);
+        if (this.stopStateListener && this.listenerAttached) {
+            try {
+                chrome.runtime.onMessage.removeListener(this.stopStateListener);
+                this.listenerAttached = false;
+            } catch (error) {
+                console.warn('Failed to remove listener during cleanup:', error.message);
+            }
         }
 
         // 参照をクリア

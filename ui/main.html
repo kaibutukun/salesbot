@@ -45,6 +45,10 @@
                         <img class="icon" src="../assets/icons/url-list.png" alt="送信先リスト管理" />
                         送信先リスト管理
                     </button>
+                    <button class="nav-item" data-tab="sales-list">
+                        <img class="icon" src="../assets/icons/url-list.png" alt="営業リスト" />
+                        営業リスト
+                    </button>
                     <button class="nav-item" data-tab="profiles">
                         <img class="icon" src="../assets/icons/profiles.png" alt="フォーム入力データ管理" />
                         フォーム入力データ管理
@@ -160,6 +164,51 @@
                                     <img class="icon" src="../assets/icons/play.png" alt="送信開始" />
                                     送信開始
                                 </button>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- ====================================
+                     営業リストタブ
+                     ==================================== -->
+                <div id="sales-list" class="tab-content">
+                    <h2>営業リスト</h2>
+                    
+                    <!-- フィルター・ページ情報 -->
+                    <div class="url-management">
+                        <div class="form-row">
+                            <div class="form-group">
+                                <select id="industryFilter" class="form-control">
+                                    <option value="">すべて</option>
+                                    <option value="IT・ソフトウェア">IT・ソフトウェア</option>
+                                    <option value="金融">金融</option>
+                                    <option value="製造業">製造業</option>
+                                    <option value="商社">商社</option>
+                                    <option value="サービス業">サービス業</option>
+                                    <option value="建設・不動産">建設・不動産</option>
+                                    <option value="小売・流通">小売・流通</option>
+                                    <option value="医療・介護">医療・介護</option>
+                                    <option value="教育">教育</option>
+                                    <option value="その他">その他</option>
+                                </select>
+                            </div>
+                            <div class="form-group">
+                                <div id="salesPageInfo" class="stat-value">0/0</div>
+                            </div>
+                        </div>
+                    </div>
+
+                    <!-- 営業リスト表示エリア -->
+                    <div class="url-management">
+                        <div class="form-group">
+                            <div id="salesListContainer" class="url-list-display">
+                                <div id="salesNoDataMessage" class="no-results" style="display: none;">
+                                    営業リストデータがありません
+                                </div>
+                                <ul id="salesListItems" class="sales-list-items">
+                                    <!-- 動的に生成される営業リスト項目 -->
+                                </ul>
                             </div>
                         </div>
                     </div>
