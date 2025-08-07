@@ -307,11 +307,10 @@ document.addEventListener('DOMContentLoaded', function() {
         updateSalesListDisplay() {
             this.applySalesFilter();
             this.renderSalesListItems();
-            this.updateSalesPageInfo();
         }
 
         /**
-         * 営業リスト項目を描画（シンプルなリスト形式）
+         * 営業リスト項目を描画（表形式）
          */
         renderSalesListItems() {
             const salesListItems = document.getElementById('salesListItems');
@@ -333,38 +332,14 @@ document.addEventListener('DOMContentLoaded', function() {
             const endIndex = Math.min(startIndex + this.itemsPerPage, this.filteredData.length);
             const pageData = this.filteredData.slice(startIndex, endIndex);
 
-            // シンプルなリスト項目を生成（●で始まるリスト形式）
+            // 表形式のデータを生成
             salesListItems.innerHTML = pageData.map(item => `
-                <li>
-                    <strong>${item.companyName}</strong> - ${item.industry} - ${item.representative} - ${item.employeeCount} - ${item.email} - ${item.phone} - <a href="${item.website}" target="_blank">${item.website}</a>
-                </li>
+                <tr>
+                    <td>${item.companyName}</td>
+                    <td>${item.industry}</td>
+                    <td>${item.employeeCount}</td>
+                </tr>
             `).join('');
-
-            // CSSスタイルを動的に適用
-            salesListItems.style.listStyleType = 'disc';
-            salesListItems.style.paddingLeft = '20px';
-            salesListItems.style.lineHeight = '1.6';
-            
-            // 各リスト項目のスタイリング
-            const listItems = salesListItems.querySelectorAll('li');
-            listItems.forEach(item => {
-                item.style.marginBottom = '8px';
-                item.style.color = '#333';
-                item.style.fontSize = '14px';
-            });
-        }
-
-        /**
-         * ページ情報を更新（20/100形式）
-         */
-        updateSalesPageInfo() {
-            const salesPageInfo = document.getElementById('salesPageInfo');
-
-            if (salesPageInfo) {
-                const startIndex = (this.currentPage - 1) * this.itemsPerPage + 1;
-                const endIndex = Math.min(this.currentPage * this.itemsPerPage, this.filteredData.length);
-                salesPageInfo.textContent = `${endIndex}/${this.filteredData.length}`;
-            }
         }
 
         /**
@@ -389,34 +364,65 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // 営業リスト専用のスタイルを動的に追加
     const salesListStyles = `
-        .sales-list-items {
+        .sales-list-table {
+            width: 100%;
+            border-collapse: collapse;
             background: #fff;
             border: 1px solid #ddd;
             border-radius: 4px;
-            padding: 15px;
-            min-height: 400px;
+            overflow: hidden;
             margin: 0;
         }
         
-        .sales-list-items li {
-            margin-bottom: 8px;
+        .sales-list-table th {
+            background: #f8f9fa;
+            border: 1px solid #ddd;
+            padding: 12px 8px;
+            text-align: left;
+            font-weight: 600;
+            color: #495057;
+            font-size: 14px;
+        }
+        
+        .sales-list-table td {
+            border: 1px solid #ddd;
+            padding: 12px 8px;
             color: #333;
             font-size: 14px;
-            line-height: 1.6;
+            line-height: 1.4;
         }
         
-        .sales-list-items li strong {
-            color: #2c3e50;
-            font-weight: 600;
+        .sales-list-table tr:nth-child(even) {
+            background: #f8f9fa;
         }
         
-        .sales-list-items li a {
-            color: #3498db;
-            text-decoration: none;
+        .sales-list-table tr:hover {
+            background: #e9ecef;
         }
         
-        .sales-list-items li a:hover {
-            text-decoration: underline;
+        .sales-filter-only {
+            background: transparent;
+            border: none;
+            padding: 0;
+            margin-bottom: 20px;
+        }
+        
+        .industry-filter-select {
+            background: #f0f4f8;
+            border: 1px solid #e0e6ed;
+            border-radius: 4px;
+            padding: 8px 12px;
+            font-size: 14px;
+            color: #333;
+            cursor: pointer;
+            outline: none;
+            width: 200px;
+            max-width: 25%;
+        }
+        
+        .industry-filter-select:focus {
+            outline: none;
+            box-shadow: none;
         }
     `;
     
