@@ -2388,6 +2388,90 @@ body.popup-body {
 }
 
 /* ====================================================================
+   Sales List Components
+   ==================================================================== */
+
+/* Sales List Table */
+.sales-list-table {
+  width: 100%;
+  border-collapse: collapse;
+  background: #fff;
+  border: 1px solid #ddd;
+  border-radius: 4px;
+  overflow: hidden;
+  margin: 0;
+}
+
+.sales-list-table th {
+  background: #f8f9fa;
+  border: 1px solid #ddd;
+  padding: 12px 8px;
+  text-align: left;
+  font-weight: 600;
+  color: #495057;
+  font-size: 14px;
+}
+
+.sales-list-table td {
+  border: 1px solid #ddd;
+  padding: 12px 8px;
+  color: #333;
+  font-size: 14px;
+  line-height: 1.4;
+}
+
+.sales-list-table tr:nth-child(even) {
+  background: #f8f9fa;
+}
+
+.sales-list-table tr:hover {
+  background: #e9ecef;
+}
+
+/* Sales File Links */
+.sales-file-link {
+  color: #007bff;
+  text-decoration: none;
+  font-weight: 500;
+  transition: color 0.2s ease;
+}
+
+.sales-file-link:hover {
+  color: #0056b3;
+  text-decoration: underline;
+}
+
+.sales-file-link:visited {
+  color: #6f42c1;
+}
+
+/* Sales Filter */
+.sales-filter-only {
+  background: transparent;
+  border: none;
+  padding: 0;
+  margin-bottom: 20px;
+}
+
+.industry-filter-select {
+  background: #f0f4f8;
+  border: 1px solid #e0e6ed;
+  border-radius: 4px;
+  padding: 8px 12px;
+  font-size: 14px;
+  color: #333;
+  cursor: pointer;
+  outline: none;
+  width: 200px;
+  max-width: 25%;
+}
+
+.industry-filter-select:focus {
+  outline: none;
+  box-shadow: none;
+}
+
+/* ====================================================================
    Animations
    ==================================================================== */
 @keyframes pulse {

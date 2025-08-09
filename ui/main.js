@@ -158,94 +158,6 @@ document.addEventListener('DOMContentLoaded', function() {
         }
     }
 
-    // ====================================
-    // CSS スタイルの動的追加
-    // ====================================
-    
-    // 営業リスト専用のスタイルを動的に追加
-    const salesListStyles = `
-        .sales-list-table {
-            width: 100%;
-            border-collapse: collapse;
-            background: #fff;
-            border: 1px solid #ddd;
-            border-radius: 4px;
-            overflow: hidden;
-            margin: 0;
-        }
-        
-        .sales-list-table th {
-            background: #f8f9fa;
-            border: 1px solid #ddd;
-            padding: 12px 8px;
-            text-align: left;
-            font-weight: 600;
-            color: #495057;
-            font-size: 14px;
-        }
-        
-        .sales-list-table td {
-            border: 1px solid #ddd;
-            padding: 12px 8px;
-            color: #333;
-            font-size: 14px;
-            line-height: 1.4;
-        }
-        
-        .sales-list-table tr:nth-child(even) {
-            background: #f8f9fa;
-        }
-        
-        .sales-list-table tr:hover {
-            background: #e9ecef;
-        }
-        
-        .sales-file-link {
-            color: #007bff;
-            text-decoration: none;
-            font-weight: 500;
-            transition: color 0.2s ease;
-        }
-        
-        .sales-file-link:hover {
-            color: #0056b3;
-            text-decoration: underline;
-        }
-        
-        .sales-file-link:visited {
-            color: #6f42c1;
-        }
-        
-        .sales-filter-only {
-            background: transparent;
-            border: none;
-            padding: 0;
-            margin-bottom: 20px;
-        }
-        
-        .industry-filter-select {
-            background: #f0f4f8;
-            border: 1px solid #e0e6ed;
-            border-radius: 4px;
-            padding: 8px 12px;
-            font-size: 14px;
-            color: #333;
-            cursor: pointer;
-            outline: none;
-            width: 200px;
-            max-width: 25%;
-        }
-        
-        .industry-filter-select:focus {
-            outline: none;
-            box-shadow: none;
-        }
-    `;
-    
-    // スタイルを head に追加
-    const styleSheet = document.createElement('style');
-    styleSheet.textContent = salesListStyles;
-    document.head.appendChild(styleSheet);
 
     // ====================================
     // Supabase設定とクライアント初期化は services/auth.service.js で管理
@@ -304,6 +216,125 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // 営業リスト管理インスタンス初期化
     const salesListManager = new SalesListManager();
+    
+    // 送信先リスト管理用プロフィール選択管理クラス
+    class UrlProfileManager {
+        constructor() {
+            this.selectedProfileId = null;
+            this.profiles = [];
+            this.initializeUrlProfileSelect();
+        }
+
+        /**
+         * 送信先リスト管理用プロフィール選択の初期化
+         */
+        async initializeUrlProfileSelect() {
+            const urlProfileSelect = getElement('urlProfileSelect');
+            if (!urlProfileSelect) return;
+
+            // プロフィール変更イベントリスナー
+            urlProfileSelect.addEventListener('change', (e) => {
+                this.selectedProfileId = e.target.value;
+                this.saveSelectedProfile();
+                showToast(`プロフィール「${e.target.options[e.target.selectedIndex].text}」を選択しました`, 'info');
+            });
+
+            // 初期プロフィールを読み込み
+            await this.loadUrlProfiles();
+        }
+
+        /**
+         * プロフィール一覧を読み込み
+         */
+        async loadUrlProfiles() {
+            try {
+                // ProfileManagerからプロフィール一覧を取得
+                const profileData = await storageService.getItem('optionPatterns') || [];
+                this.profiles = profileData;
+
+                // 保存された選択プロフィールを取得
+                const savedProfileId = await storageService.getItem('urlSelectedProfile');
+                this.selectedProfileId = savedProfileId;
+
+                // ドロップダウンを更新
+                this.updateUrlProfileSelect();
+            } catch (error) {
+                console.error('Failed to load URL profiles:', error);
+                showToast('プロフィールの読み込みに失敗しました', 'error');
+            }
+        }
+
+        /**
+         * プロフィール選択ドロップダウンを更新
+         */
+        updateUrlProfileSelect() {
+            const urlProfileSelect = getElement('urlProfileSelect');
+            if (!urlProfileSelect) return;
+
+            // 選択肢をクリア
+            urlProfileSelect.innerHTML = '';
+
+            // デフォルト選択肢を追加
+            const defaultOption = document.createElement('option');
+            defaultOption.value = '';
+            defaultOption.textContent = 'プロフィールを選択してください';
+            urlProfileSelect.appendChild(defaultOption);
+
+            // プロフィール選択肢を追加
+            this.profiles.forEach(profile => {
+                const option = document.createElement('option');
+                option.value = profile.id;
+                option.textContent = profile.name || `プロフィール ${profile.id}`;
+                urlProfileSelect.appendChild(option);
+            });
+
+            // 保存された選択プロフィールを復元
+            if (this.selectedProfileId) {
+                urlProfileSelect.value = this.selectedProfileId;
+            }
+        }
+
+        /**
+         * 選択されたプロフィールを保存
+         */
+        async saveSelectedProfile() {
+            try {
+                await storageService.setItem('urlSelectedProfile', this.selectedProfileId);
+            } catch (error) {
+                console.error('Failed to save selected profile:', error);
+            }
+        }
+
+        /**
+         * 現在選択されているプロフィールを取得
+         */
+        getSelectedProfile() {
+            if (!this.selectedProfileId) return null;
+            return this.profiles.find(profile => profile.id === this.selectedProfileId);
+        }
+
+        /**
+         * プロフィール一覧を更新（ProfileManager連携用）
+         */
+        async refreshProfiles() {
+            await this.loadUrlProfiles();
+        }
+
+        /**
+         * 送信実行時に選択されたプロフィールのバリデーション
+         */
+        validateSelectedProfile() {
+            const selectedProfile = this.getSelectedProfile();
+            if (!selectedProfile) {
+                showToast('送信実行前にプロフィールを選択してください', 'warning');
+                return false;
+            }
+            return true;
+        }
+    }
+    
+    // 送信先リスト管理用プロフィール選択インスタンス初期化
+    const urlProfileManager = new UrlProfileManager();
     
     // BatchServiceは他のサービスへの依存性があるため、後で初期化
     let batchService = null;
@@ -393,6 +424,11 @@ document.addEventListener('DOMContentLoaded', function() {
             salesListManager.onSalesListTabActivated();
         }
 
+        // 送信先リスト管理タブがアクティブになった場合の特別処理
+        if (tabId === 'url-list') {
+            urlProfileManager.refreshProfiles();
+        }
+
         // URLパラメータを更新
         window.history.replaceState(null, '', `?tab=${tabId}`);
     }
@@ -465,6 +501,10 @@ document.addEventListener('DOMContentLoaded', function() {
             await authService.initializeAuth();
             await urlManager.loadUrlList();
             await profileManager.loadProfiles();
+            
+            // 送信先リスト管理用プロフィール選択を更新
+            await urlProfileManager.refreshProfiles();
+            
             await resultsManager.loadResults();
             await settingsManager.loadAllSettings();
             await refreshDashboard();
@@ -475,7 +515,17 @@ document.addEventListener('DOMContentLoaded', function() {
             // 実行ボタンのイベントリスナー設定
             const executeFromUrlTabButton = getElement('executeFromUrlTab');
             if (executeFromUrlTabButton) {
-                urlManager.setExecuteButtonToExecuteState(batchService.getExecuteButtonHandler());
+                // 送信実行時のプロフィール選択バリデーション機能を統合
+                const originalExecuteHandler = batchService.getExecuteButtonHandler();
+                const enhancedExecuteHandler = () => {
+                    // プロフィール選択のバリデーション
+                    if (!urlProfileManager.validateSelectedProfile()) {
+                        return; // バリデーション失敗時は実行を中止
+                    }
+                    // バリデーション成功時は元の実行処理を継続
+                    originalExecuteHandler();
+                };
+                urlManager.setExecuteButtonToExecuteState(enhancedExecuteHandler);
             }
             
             setInitialTab();
