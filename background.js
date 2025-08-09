@@ -173,27 +173,17 @@ try {
     console.error('Supabase initialization failed:', error);
 }
 
-// グローバル状態管理
+// グローバル状態管理（シンプル化）
 let keepaliveInterval = null;
 let isStopping = false;
-let activePromiseRejects = new Set();
 
-// 停止処理関連
+// 停止処理関連（シンプル化）
 function resetStopState() {
     isStopping = false;
-    activePromiseRejects.clear();
 }
 
 function executeStop() {
     isStopping = true;
-    activePromiseRejects.forEach(reject => {
-        try {
-            reject(new Error(ERROR_STOP_REQUESTED));
-        } catch (e) {
-            // エラーを無視
-        }
-    });
-    activePromiseRejects.clear();
 }
 
 function checkStopped() {
@@ -227,9 +217,9 @@ async function waitForPageLoad(tabId) {
 }
 
 // URL処理メイン関数
-async function navigateAndExecuteScript(tabId, url, sentUrlList, excludeDomains) {
+async function navigateAndExecuteScript(tabId, url, excludeDomains) {
     return Promise.race([
-        executeUrlProcessing(tabId, url, sentUrlList, excludeDomains),
+        executeUrlProcessing(tabId, url, excludeDomains),
         new Promise((resolve) => {
             setTimeout(() => {
                 resolve({
@@ -244,7 +234,7 @@ async function navigateAndExecuteScript(tabId, url, sentUrlList, excludeDomains)
 }
 
 // URL処理実行
-async function executeUrlProcessing(tabId, url, sentUrlList, excludeDomains) {
+async function executeUrlProcessing(tabId, url, excludeDomains) {
     if (isStopping) {
         return {
             url: url,
@@ -346,15 +336,8 @@ async function executeUrlProcessing(tabId, url, sentUrlList, excludeDomains) {
             }
         }
 
-        // 重複送信チェック
-        if (sentUrlList.includes(contactUrl)) {
-            return {
-                url: url,
-                result: "失敗",
-                contact: contactUrl,
-                reason: "重複送信のため送信しない"
-            };
-        }
+
+
     } else {
         return {
             url: url,
@@ -560,23 +543,12 @@ async function batchBreak(batchNumber, totalBatches, tabId) {
 
         const iterations = 6;
         const interval = BATCH_DELAY / iterations;
-        let wrappedReject;
-
-        const originalReject = reject;
-        wrappedReject = (error) => {
-            isStoppedLoop = true;
-            activePromiseRejects.delete(wrappedReject);
-            originalReject(error);
-        };
-
-        activePromiseRejects.add(wrappedReject);
         let isStoppedLoop = false;
-        let currentIteration = 0;
 
         (async () => {
             while (currentIteration < iterations) {
                 if (isStopping) {
-                    wrappedReject(new Error(ERROR_STOP_REQUESTED));
+                    reject(new Error(ERROR_STOP_REQUESTED));
                     return;
                 }
 
@@ -595,7 +567,6 @@ async function batchBreak(batchNumber, totalBatches, tabId) {
                 currentIteration++;
             }
 
-            activePromiseRejects.delete(wrappedReject);
             resolve();
         })();
     });
@@ -692,25 +663,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
                 // 重複送信設定取得
                 let duplicateData = await chrome.storage.sync.get("DoNotDuplicateSend");
-                let sentUrlList = [];
-
-                if (duplicateData && duplicateData.DoNotDuplicateSend) {
-                    let todos = await db.getAllTodos();
-                    for (let i = 0; i < todos.length; i++) {
-                        if (todos[i].completed) {
-                            for (let j = 0; j < todos[i].description.length; j++) {
-                                if (todos[i].description[j].result === "成功") {
-                                    sentUrlList.push(todos[i].description[j].contact);
-                                }
-                            }
-                        }
-                    }
-                }
-
-                // 重複除去
-                sentUrlList = sentUrlList.filter((value, index, self) => 
-                    self.indexOf(value) === index
-                );
 
                 // 最新Todo取得
                 let latestTodo;
@@ -736,6 +688,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
                 let urlList = latestTodo.description;
                 const totalUrls = urlList.length;
+                
+                // 現在のTodo内での重複チェック用リスト（URLの出現回数をカウント）
+                let urlCountMap = new Map();
 
                 // バッチ処理
                 for (let batchStart = 0; batchStart < totalUrls; batchStart += BATCH_SIZE) {
@@ -753,7 +708,32 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                         let result;
 
                         if (currentUrl.startsWith('http')) {
-                            result = await navigateAndExecuteScript(tabId, currentUrl, sentUrlList, excludeDomain);
+                            // 重複チェック
+                            if (duplicateData && duplicateData.DoNotDuplicateSend) {
+                                const contactUrl = currentUrl.split(',')[0]; // タグ部分を除去
+                                
+                                // URLの出現回数をカウント
+                                const currentCount = urlCountMap.get(contactUrl) || 0;
+                                urlCountMap.set(contactUrl, currentCount + 1);
+                                
+                                // 2回目以降の出現は除外（1回目は処理する）
+                                if (currentCount > 0) {
+                                    result = {
+                                        url: currentUrl,
+                                        result: "失敗",
+                                        contact: contactUrl,
+                                        reason: "重複送信のため除外"
+                                    };
+                                    console.log(`重複URL除外: ${contactUrl} (${currentCount + 1}回目の出現)`);
+                                } else {
+                                    // 1回目の出現は処理を実行
+                                    result = await navigateAndExecuteScript(tabId, currentUrl, excludeDomain);
+                                    console.log(`初回URL処理: ${contactUrl}`);
+                                }
+                            } else {
+                                // 重複チェックが無効な場合は通常処理
+                                result = await navigateAndExecuteScript(tabId, currentUrl, excludeDomain);
+                            }
                         } else {
                             result = {
                                 url: currentUrl,
@@ -764,11 +744,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                         }
 
                         await updateProgress(latestTodo.id, i, result);
-
-                        // 成功時は送信済みリストに追加
-                        if (duplicateData && duplicateData.DoNotDuplicateSend && result.result === "成功") {
-                            sentUrlList.push(result.contact);
-                        }
                     }
 
                     // 最後のバッチでない場合は休憩

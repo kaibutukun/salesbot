@@ -994,7 +994,7 @@ button:disabled {
 
 .url-actions-top {
   display: flex;
-  gap: 12px;
+  justify-content: flex-end;
   margin-bottom: 12px;
 }
 

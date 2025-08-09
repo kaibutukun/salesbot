@@ -486,16 +486,18 @@ async function onExecute(tags) {
         // 送信ボタンの検索
         // ====================================
         
-        // テキストベースのボタン
-        let textButtons = document.querySelectorAll('span, button');
+        // テキストベースのボタン（currentDocumentを使用）
+        let textButtons = currentDocument.querySelectorAll('span, button');
         let textSubmitButtons = Array.from(textButtons).filter(button =>
-            button.innerText.includes('送信') || button.innerText.includes('送 信') || button.innerText.includes('送　信') ||
-            button.innerText.includes('確認') || button.innerText.includes('確 認') || button.innerText.includes('確　認') ||
-            button.innerText.includes('Send') || button.innerText.includes('SEND') ||
-            button.innerText.includes('Submit') || button.innerText.includes('SUBMIT') ||
-            button.innerText.includes('次へ') || button.innerText.includes('次に進む') ||
-            button.innerText.includes('はい') || button.innerText.includes('OK') ||
-            button.innerText.includes('同意する') || button.innerText.includes('続行')
+            button.innerText && (
+                button.innerText.includes('送信') || button.innerText.includes('送 信') || button.innerText.includes('送　信') ||
+                button.innerText.includes('確認') || button.innerText.includes('確 認') || button.innerText.includes('確　認') ||
+                button.innerText.includes('Send') || button.innerText.includes('SEND') ||
+                button.innerText.includes('Submit') || button.innerText.includes('SUBMIT') ||
+                button.innerText.includes('次へ') || button.innerText.includes('次に進む') ||
+                button.innerText.includes('はい') || button.innerText.includes('OK') ||
+                button.innerText.includes('同意する') || button.innerText.includes('続行')
+            )
         );
 
         // input要素のボタン
@@ -534,17 +536,53 @@ async function onExecute(tags) {
             Array.from(inputSubmitButtons)
         );
 
+        // デバッグ情報をログに出力
+        console.log('送信ボタン検索結果:', {
+            textButtons: textSubmitButtons.length,
+            inputButtons: inputSubmitButtons.length,
+            imageButtons: imageSubmitButtons.length,
+            total: allSubmitButtons.length,
+            currentDocument: currentDocument === document ? 'main' : 'iframe'
+        });
+
         if (allSubmitButtons.length === 0) {
             chrome.runtime.sendMessage({
                 action: ACTION_SEND,
                 success: false,
-                message: "対応できない問い合わせフォームです",
-                detail: "submitButtons.length === 0"
+                message: "送信ボタンが見つかりませんでした",
+                detail: `submitButtons.length === 0, currentDocument: ${currentDocument === document ? 'main' : 'iframe'}`
             });
             return;
         }
 
-        let submitButton = allSubmitButtons[allSubmitButtons.length - 1];
+        // 有効なボタンをフィルタリング（disabled、hidden、非表示のボタンを除外）
+        let validSubmitButtons = allSubmitButtons.filter(button => {
+            // ボタンが表示されているかチェック
+            const style = window.getComputedStyle(button);
+            const isVisible = style.display !== 'none' && 
+                            style.visibility !== 'hidden' && 
+                            button.offsetWidth > 0 && 
+                            button.offsetHeight > 0;
+            
+            // disabled状態でないかチェック
+            const isEnabled = !button.disabled && 
+                            !button.hasAttribute('disabled') &&
+                            !button.classList.contains('disabled');
+            
+            return isVisible && isEnabled;
+        });
+
+        if (validSubmitButtons.length === 0) {
+            chrome.runtime.sendMessage({
+                action: ACTION_SEND,
+                success: false,
+                message: "有効な送信ボタンが見つかりませんでした",
+                detail: `validSubmitButtons.length === 0, total: ${allSubmitButtons.length}`
+            });
+            return;
+        }
+
+        let submitButton = validSubmitButtons[validSubmitButtons.length - 1];
 
         // ====================================
         // reCAPTCHA検出
@@ -635,14 +673,16 @@ async function onExecute(tags) {
 
         if (visibleTextareas.length === 0) {
             // 確認ページの場合の最終送信ボタン処理
-            let confirmTextButtons = document.querySelectorAll('span, button');
+            let confirmTextButtons = currentDocument.querySelectorAll('span, button');
             let confirmTextSubmitButtons = Array.from(confirmTextButtons).filter(button =>
-                button.innerText.includes('送信') || button.innerText.includes('送 信') || button.innerText.includes('送　信') ||
-                button.innerText.includes('はい') || button.innerText.includes('OK') ||
-                button.innerText.includes('同意する') || button.innerText.includes('続行')
+                button.innerText && (
+                    button.innerText.includes('送信') || button.innerText.includes('送 信') || button.innerText.includes('送　信') ||
+                    button.innerText.includes('はい') || button.innerText.includes('OK') ||
+                    button.innerText.includes('同意する') || button.innerText.includes('続行')
+                )
             );
 
-            let confirmInputButtons = document.querySelectorAll('input[type="submit"], input[type="button"]');
+            let confirmInputButtons = currentDocument.querySelectorAll('input[type="submit"], input[type="button"]');
             let confirmInputSubmitButtons = Array.from(confirmInputButtons).filter(button =>
                 button.value && (
                     button.value.includes('送信') || button.value.includes('送 信') || button.value.includes('送　信') ||
@@ -657,24 +697,57 @@ async function onExecute(tags) {
                 Array.from(confirmInputSubmitButtons)
             );
 
+            // デバッグ情報をログに出力
+            console.log('確認画面ボタン検索結果:', {
+                textButtons: confirmTextSubmitButtons.length,
+                inputButtons: confirmInputSubmitButtons.length,
+                total: confirmButtons.length,
+                currentDocument: currentDocument === document ? 'main' : 'iframe'
+            });
+
             if (confirmButtons.length === 0) {
                 chrome.runtime.sendMessage({
                     action: ACTION_SEND,
                     success: true,
                     message: "",
-                    detail: "buttons.length === 0"
+                    detail: "確認画面でボタンが見つからないため完了とみなす"
                 });
                 return;
             }
 
-            confirmButtons[confirmButtons.length - 1].click();
+            // 有効な確認ボタンをフィルタリング
+            let validConfirmButtons = confirmButtons.filter(button => {
+                const style = window.getComputedStyle(button);
+                const isVisible = style.display !== 'none' && 
+                                style.visibility !== 'hidden' && 
+                                button.offsetWidth > 0 && 
+                                button.offsetHeight > 0;
+                
+                const isEnabled = !button.disabled && 
+                                !button.hasAttribute('disabled') &&
+                                !button.classList.contains('disabled');
+                
+                return isVisible && isEnabled;
+            });
+
+            if (validConfirmButtons.length === 0) {
+                chrome.runtime.sendMessage({
+                    action: ACTION_SEND,
+                    success: false,
+                    message: "有効な確認ボタンが見つかりませんでした",
+                    detail: `validConfirmButtons.length === 0, total: ${confirmButtons.length}`
+                });
+                return;
+            }
+
+            validConfirmButtons[validConfirmButtons.length - 1].click();
             await new Promise(resolve => setTimeout(resolve, FORM_TIMEOUT));
 
             chrome.runtime.sendMessage({
                 action: ACTION_SEND,
                 success: true,
                 message: "",
-                detail: "buttons[buttons.length - 1].click();"
+                detail: "確認画面の最終ボタンをクリック完了"
             });
             return;
         } else {

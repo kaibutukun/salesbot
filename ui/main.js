@@ -462,6 +462,11 @@ document.addEventListener('DOMContentLoaded', function() {
                 batchService.progressMonitor.setStorageService(storageService);
             }
 
+            // URLマネージャーにexecuteHandlerを設定
+            if (urlManager && batchService) {
+                urlManager.setExecuteHandler(() => batchService.startSending());
+            }
+
             await authService.initializeAuth();
             await urlManager.loadUrlList();
             await profileManager.loadProfiles();
@@ -470,12 +475,11 @@ document.addEventListener('DOMContentLoaded', function() {
             await refreshDashboard();
             
             // バッチ処理の状態復元
-            await batchService.checkAndRestoreSendingState();
+            await batchService.restoreSendingState();
             
-            // 実行ボタンのイベントリスナー設定
-            const executeFromUrlTabButton = getElement('executeFromUrlTab');
-            if (executeFromUrlTabButton) {
-                urlManager.setExecuteButtonToExecuteState(batchService.getExecuteButtonHandler());
+            // 実行ボタンの初期状態を設定
+            if (urlManager) {
+                urlManager.setWaitingState();
             }
             
             setInitialTab();
@@ -491,6 +495,12 @@ document.addEventListener('DOMContentLoaded', function() {
     
     // 初期化を実行
     init();
+
+    // デバッグ用：送信開始・停止ボタンの状態確認
+    console.log('URLマネージャー初期化完了:', {
+        urlManager: !!urlManager,
+        batchService: !!batchService
+    });
 
     // ナビゲーションタブのイベントリスナー
     navItems.forEach(item => {

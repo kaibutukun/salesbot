@@ -7,40 +7,41 @@ import { ExDB } from '../shared/database.js';
 
 export class UrlManager {
     constructor(showToastFn = null, getElementFn = null, refreshDashboardFn = null) {
-        this.showToastFunction = showToastFn;
-        this.getElementFunction = getElementFn;
-        this.refreshDashboardFunction = refreshDashboardFn;
-        this.originalExecuteHandler = null;
-        this.originalStopHandler = null;
-        this.elements = this.initializeElements();
+        this.showToastFn = showToastFn || (() => {});
+        this.getElementFn = getElementFn || ((id) => document.getElementById(id));
+        this.refreshDashboardFn = refreshDashboardFn || (() => {});
+        
+        this.elements = {};
+        this.isExecuting = false;
+        this.executeHandler = null;
+        this.stopHandler = null;
+        
+        this.initializeElements();
         this.setupEventListeners();
     }
 
     initializeElements() {
-        return {
-            urlListTextarea: this.getElement('urlListTextarea'),
-            saveUrlListButton: this.getElement('saveUrlList'),
-            clearUrlListButton: this.getElement('clearUrlList'),
-            executeFromUrlTabButton: this.getElement('executeFromUrlTab')
-        };
+        this.elements.urlListTextarea = this.getElement('urlListTextarea');
+        this.elements.clearUrlListButton = this.getElement('clearUrlList');
+        this.elements.executeFromUrlTabButton = this.getElement('executeFromUrlTab');
     }
 
     getElement(id) {
-        if (this.getElementFunction) {
-            return this.getElementFunction(id);
+        if (this.getElementFn) {
+            return this.getElementFn(id);
         }
         return document.getElementById(id);
     }
 
     showToast(message, type = 'info') {
-        if (this.showToastFunction) {
-            this.showToastFunction(message, type);
+        if (this.showToastFn) {
+            this.showToastFn(message, type);
         }
     }
 
     async refreshDashboard() {
-        if (this.refreshDashboardFunction) {
-            await this.refreshDashboardFunction();
+        if (this.refreshDashboardFn) {
+            await this.refreshDashboardFn();
         }
     }
 
@@ -50,17 +51,17 @@ export class UrlManager {
         
         if (latestTodo && !latestTodo.completed) {
             await db.deleteTodo(latestTodo.id);
-            return true;
         }
-        return false;
     }
 
     setupEventListeners() {
-        if (this.elements.saveUrlListButton) {
-            this.elements.saveUrlListButton.addEventListener('click', () => this.saveUrlList());
-        }
         if (this.elements.clearUrlListButton) {
             this.elements.clearUrlListButton.addEventListener('click', () => this.clearUrlList());
+        }
+        
+        // 実行ボタンのクリックイベント
+        if (this.elements.executeFromUrlTabButton) {
+            this.elements.executeFromUrlTabButton.addEventListener('click', () => this.handleExecuteButtonClick());
         }
     }
 
@@ -76,33 +77,6 @@ export class UrlManager {
         } else {
             this.elements.urlListTextarea.value = '';
         }
-    }
-
-    async saveUrlList() {
-        if (!this.elements.urlListTextarea) return;
-
-        const urls = this.elements.urlListTextarea.value.trim().split('\n').filter(url => url.trim() !== '');
-        
-        if (urls.length === 0) {
-            this.showToast('URLを入力してください', 'warning');
-            return;
-        }
-
-        await this.deleteLatestIncompleteTodo();
-
-        const db = new ExDB();
-        const date = new Date();
-        const title = date.toLocaleString('ja-JP');
-        const description = urls.map(url => ({
-            url: url.trim(),
-            result: '',
-            contact: '',
-            reason: ''
-        }));
-
-        await db.addTodo(title, description);
-        this.showToast(`URLリストを保存しました (${urls.length}件)`, 'success');
-        await this.refreshDashboard();
     }
 
     async clearUrlList() {
@@ -127,37 +101,49 @@ export class UrlManager {
         return this.getCurrentUrls().length === 0;
     }
 
-    setExecuteButtonToStopState(stopHandler) {
+    // シンプルなボタンクリックハンドラー
+    handleExecuteButtonClick() {
+        if (this.isExecuting) {
+            // 実行中の場合：停止処理
+            if (this.stopHandler) {
+                this.stopHandler();
+            }
+        } else {
+            // 待機中の場合：実行処理
+            if (this.executeHandler) {
+                this.executeHandler();
+            } else {
+                this.showToast('実行ハンドラーが設定されていません', 'error');
+            }
+        }
+    }
+
+    // 実行状態に設定
+    setExecutingState(executeHandler, stopHandler) {
+        this.executeHandler = executeHandler;
+        this.stopHandler = stopHandler;
+        this.isExecuting = true;
+        
         if (this.elements.executeFromUrlTabButton) {
             this.elements.executeFromUrlTabButton.innerHTML = '<img class="icon" src="../assets/icons/stop.png" alt="送信停止" />送信停止';
             this.elements.executeFromUrlTabButton.className = 'stop-button';
             this.elements.executeFromUrlTabButton.disabled = false;
-            
-            if (this.originalExecuteHandler) {
-                this.elements.executeFromUrlTabButton.removeEventListener('click', this.originalExecuteHandler);
-            }
-            
-            this.originalStopHandler = stopHandler;
-            this.elements.executeFromUrlTabButton.addEventListener('click', stopHandler);
         }
     }
 
-    setExecuteButtonToExecuteState(executeHandler) {
+    // 待機状態に設定
+    setWaitingState() {
+        this.isExecuting = false;
+        
         if (this.elements.executeFromUrlTabButton) {
             this.elements.executeFromUrlTabButton.innerHTML = '<img class="icon" src="../assets/icons/play.png" alt="送信開始" />送信開始';
             this.elements.executeFromUrlTabButton.className = 'success-button';
             this.elements.executeFromUrlTabButton.disabled = false;
-            
-            if (this.originalStopHandler) {
-                this.elements.executeFromUrlTabButton.removeEventListener('click', this.originalStopHandler);
-            }
-            
-            this.originalExecuteHandler = executeHandler;
-            this.elements.executeFromUrlTabButton.addEventListener('click', executeHandler);
         }
     }
 
-    setExecuteButtonToDisabledState() {
+    // 無効状態に設定
+    setDisabledState() {
         if (this.elements.executeFromUrlTabButton) {
             this.elements.executeFromUrlTabButton.disabled = true;
             this.elements.executeFromUrlTabButton.innerHTML = '<img class="icon" src="../assets/icons/stop.png" alt="停止中" />停止中...';
@@ -165,31 +151,90 @@ export class UrlManager {
         }
     }
 
-    async validateUrlList() {
-        if (this.elements.urlListTextarea) {
+    // executeHandlerを設定
+    setExecuteHandler(handler) {
+        this.executeHandler = handler;
+    }
+
+    // 停止処理用の状態設定
+    setStopState() {
+        this.isExecuting = false;
+        if (this.elements.executeFromUrlTabButton) {
+            this.elements.executeFromUrlTabButton.innerHTML = '<img class="icon" src="../assets/icons/play.png" alt="送信開始" />送信開始';
+            this.elements.executeFromUrlTabButton.className = 'success-button';
+            this.elements.executeFromUrlTabButton.disabled = false;
+        }
+    }
+
+    // 送信開始時に自動保存する処理
+    async autoSaveUrlList() {
+        try {
             const urls = this.getCurrentUrls();
+            
             if (urls.length === 0) {
-                return {
-                    isValid: false,
-                    message: '送信先URLが入力されていません'
-                };
+                return { isValid: false, message: 'URLが入力されていません' };
             }
+
+            const db = new ExDB();
+            const latestTodo = await db.getLatestTodo();
+            
+            if (latestTodo && !latestTodo.completed) {
+                // 既存のタスクを更新
+                const updatedDescription = urls.map(url => ({
+                    url: url.trim(),
+                    result: '',
+                    contact: '',
+                    reason: ''
+                }));
+                
+                await db.updateTodo(latestTodo.id, { description: updatedDescription });
+            } else {
+                // 新しいタスクを作成
+                const now = new Date();
+                const title = now.toLocaleString('ja-JP');
+                const description = urls.map(url => ({
+                    url: url.trim(),
+                    result: '',
+                    contact: '',
+                    reason: ''
+                }));
+                
+                await db.addTodo(title, description);
+            }
+
+            return { isValid: true, message: 'URLリストを保存しました' };
+        } catch (error) {
+            console.error('URLリストの自動保存に失敗:', error);
+            return { isValid: false, message: 'URLリストの保存に失敗しました' };
+        }
+    }
+
+    // URLリストの検証
+    async validateUrlList() {
+        const urls = this.getCurrentUrls();
+        
+        if (urls.length === 0) {
+            return { isValid: false, message: 'URLが入力されていません' };
         }
 
-        const db = new ExDB();
-        const latestTodo = await db.getLatestTodo();
+        // 基本的なURL形式チェック
+        const invalidUrls = urls.filter(url => {
+            try {
+                new URL(url);
+                return false;
+            } catch {
+                return true;
+            }
+        });
 
-        if (!latestTodo || !latestTodo.description || latestTodo.description.length === 0) {
-            return {
-                isValid: false,
-                message: '送信先URLが設定されていません'
+        if (invalidUrls.length > 0) {
+            return { 
+                isValid: false, 
+                message: `無効なURLが含まれています: ${invalidUrls.slice(0, 3).join(', ')}` 
             };
         }
 
-        return {
-            isValid: true,
-            message: ''
-        };
+        return { isValid: true, message: `${urls.length}件のURLが有効です` };
     }
 }
 
