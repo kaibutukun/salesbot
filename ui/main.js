@@ -84,7 +84,7 @@ document.addEventListener('DOMContentLoaded', function() {
         }
 
         /**
-         * 営業リスト項目を描画（表形式）
+         * 営業リスト項目を描画（表形式・リンク対応）
          */
         renderSalesListItems() {
             const salesListItems = document.getElementById('salesListItems');
@@ -106,14 +106,40 @@ document.addEventListener('DOMContentLoaded', function() {
             const endIndex = Math.min(startIndex + this.itemsPerPage, this.filteredData.length);
             const pageData = this.filteredData.slice(startIndex, endIndex);
 
-            // 表形式のデータを生成
+            // 表形式のデータを生成（ファイル名をリンクに）
             salesListItems.innerHTML = pageData.map(item => `
                 <tr>
-                    <td>${item.companyName}</td>
+                    <td>
+                        <a href="${item.fileURL}" target="_blank" class="sales-file-link" title="ファイルをダウンロード">
+                            ${item.fileName}
+                        </a>
+                    </td>
                     <td>${item.industry}</td>
-                    <td>${item.employeeCount}</td>
+                    <td>${item.companyCount}</td>
                 </tr>
             `).join('');
+
+            // リンククリック時のイベントリスナー追加
+            this.setupFileLinks();
+        }
+
+        /**
+         * ファイルリンクのイベントリスナー設定
+         */
+        setupFileLinks() {
+            const fileLinks = document.querySelectorAll('.sales-file-link');
+            fileLinks.forEach(link => {
+                link.addEventListener('click', (e) => {
+                    const fileName = e.target.textContent;
+                    const fileUrl = e.target.getAttribute('href');
+                    
+                    // トースト通知でダウンロード開始を表示
+                    showToast(`ファイル「${fileName}」をダウンロード中...`, 'info');
+                    
+                    // リンクは通常通り新しいタブで開く
+                    // e.preventDefault() は使用しない
+                });
+            });
         }
 
         /**
@@ -172,6 +198,22 @@ document.addEventListener('DOMContentLoaded', function() {
         
         .sales-list-table tr:hover {
             background: #e9ecef;
+        }
+        
+        .sales-file-link {
+            color: #007bff;
+            text-decoration: none;
+            font-weight: 500;
+            transition: color 0.2s ease;
+        }
+        
+        .sales-file-link:hover {
+            color: #0056b3;
+            text-decoration: underline;
+        }
+        
+        .sales-file-link:visited {
+            color: #6f42c1;
         }
         
         .sales-filter-only {
