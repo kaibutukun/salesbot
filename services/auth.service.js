@@ -127,38 +127,18 @@ export class AuthService {
                 return;
             }
 
-            // ユーザー情報の取得
-            let userData;
-            const { data: existingUser, error: userError } = await this.supabaseClient
+            // ユーザー情報の取得（SQL側で自動作成される）
+            const { data: userData, error: userError } = await this.supabaseClient
                 .from('users')
                 .select('max_devices')
                 .eq('id', user.id)
-                .maybeSingle();
+                .single();
 
             if (userError) {
-                if (userError.code === 'PGRST116') {
-                    // ユーザーが存在しない場合は作成
-                    const { data: newUser, error: createError } = await this.supabaseClient
-                        .from('users')
-                        .insert({
-                            id: user.id,
-                            max_devices: 5
-                        })
-                        .select()
-                        .single();
-
-                    if (createError) {
-                        throw createError;
-                    }
-                    userData = newUser;
-                } else {
-                    throw userError;
-                }
-            } else {
-                userData = existingUser;
+                throw userError;
             }
 
-            const maxDevices = userData?.max_devices || 5;
+            const maxDevices = userData.max_devices;
 
             // 現在のデバイス数を取得
             const { data: devices, error: devicesError } = await this.supabaseClient
@@ -229,38 +209,18 @@ export class AuthService {
                 return { deviceCount: 0, maxDevices: 0, isValid: false };
             }
 
-            // ユーザー情報の取得
-            let userData;
-            const { data: existingUser, error: userError } = await this.supabaseClient
+            // ユーザー情報の取得（SQL側で自動作成される）
+            const { data: userData, error: userError } = await this.supabaseClient
                 .from('users')
                 .select('max_devices')
                 .eq('id', user.id)
-                .maybeSingle();
+                .single();
 
             if (userError) {
-                if (userError.code === 'PGRST116') {
-                    // ユーザーが存在しない場合は作成
-                    const { data: newUser, error: createError } = await this.supabaseClient
-                        .from('users')
-                        .insert({
-                            id: user.id,
-                            max_devices: 5
-                        })
-                        .select()
-                        .single();
-
-                    if (createError) {
-                        throw createError;
-                    }
-                    userData = newUser;
-                } else {
-                    throw userError;
-                }
-            } else {
-                userData = existingUser;
+                throw userError;
             }
 
-            const maxDevices = userData?.max_devices || 5;
+            const maxDevices = userData.max_devices;
 
             // 現在のデバイス数を取得
             const { data: devices, error: devicesError } = await this.supabaseClient
@@ -305,12 +265,16 @@ export class AuthService {
                 return false;
             }
 
+            // デバイスIDを生成（ブラウザ固有の識別子）
+            const deviceId = await this.generateDeviceId();
+
             const { error } = await this.supabaseClient
                 .from('user_devices')
                 .insert({
                     user_id: user.id,
-                    device_name: deviceName,
-                    created_at: new Date().toISOString()
+                    device_id: deviceId,
+                    name: deviceName,
+                    browser: this.getBrowserInfo()
                 });
 
             if (error) {
@@ -326,6 +290,40 @@ export class AuthService {
             this.showToast('デバイス登録に失敗しました', 'error');
             return false;
         }
+    }
+
+    /**
+     * デバイスIDを生成する
+     * @returns {Promise<string>} デバイスID
+     */
+    async generateDeviceId() {
+        // 既存のデバイスIDがあれば取得、なければ新規生成
+        const existingId = await chrome.storage.local.get('deviceId');
+        if (existingId.deviceId) {
+            return existingId.deviceId;
+        }
+
+        const deviceId = `device_${Date.now()}_${Math.random().toString(36).substr(2, 9)}`;
+        await chrome.storage.local.set({ deviceId });
+        return deviceId;
+    }
+
+    /**
+     * ブラウザ情報を取得する
+     * @returns {string} ブラウザ情報
+     */
+    getBrowserInfo() {
+        const userAgent = navigator.userAgent;
+        if (userAgent.includes('Chrome')) {
+            return 'Chrome';
+        } else if (userAgent.includes('Firefox')) {
+            return 'Firefox';
+        } else if (userAgent.includes('Safari')) {
+            return 'Safari';
+        } else if (userAgent.includes('Edge')) {
+            return 'Edge';
+        }
+        return 'Unknown';
     }
 
     /**
