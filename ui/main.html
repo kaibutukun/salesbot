@@ -151,28 +151,24 @@
                         </div>
                     </div>
                     
-                    <!-- 送信先URL一覧（白枠削除） -->
-                    <label for="urlListTextarea">送信先URL一覧 (1行に1URL)</label>
+                    <!-- 送信先URL一覧（ラベル行にクリアボタン配置） -->
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <label for="urlListTextarea">送信先URL一覧 (1行に1URL)</label>
+                        <button id="clearUrlList" class="danger-button">クリア</button>
+                    </div>
                     <textarea 
                         id="urlListTextarea" 
                         class="url-list-textarea" 
-                        rows="20" 
-                        cols="100" 
+                        rows="15" 
+                        style="width: 100%; max-width: none;"
                         placeholder="https://example.com">
                     </textarea>
                     
-                    <!-- ボタン群（白枠削除） -->
+                    <!-- ボタン群（送信開始のみ・青色・アイコンなし） -->
                     <div class="url-actions">
-                        <div class="url-actions-top">
-                            <button id="saveUrlList" class="primary-button">設定を保存</button>
-                            <button id="clearUrlList" class="danger-button">クリア</button>
-                        </div>
-                        <div class="url-actions-bottom">
-                            <button id="executeFromUrlTab" class="success-button">
-                                <img class="icon" src="../assets/icons/play.png" alt="送信開始" />
-                                送信開始
-                            </button>
-                        </div>
+                        <button id="executeFromUrlTab" class="primary-button">
+                            送信開始
+                        </button>
                     </div>
                 </div>
 
