@@ -249,7 +249,7 @@ export class Dashboard {
                         `;
 
                         resultItem.addEventListener('click', () => {
-                            window.location.href = `../main.html?tab=results&id=${todo.id}`;
+                            window.location.href = `?tab=results&id=${todo.id}`;
                         });
 
                         this.elements.recentResultsList.appendChild(resultItem);
