@@ -37,19 +37,12 @@ document.addEventListener('DOMContentLoaded', function() {
             this.initializeSalesList();
         }
 
-        /**
-         * 営業リスト初期化
-         */
         initializeSalesList() {
             this.setupSalesListEventListeners();
             this.updateSalesListDisplay();
         }
 
-        /**
-         * 営業リストのイベントリスナー設定
-         */
         setupSalesListEventListeners() {
-            // 業種フィルター
             const industryFilter = document.getElementById('industryFilter');
             if (industryFilter) {
                 industryFilter.addEventListener('change', (e) => {
@@ -62,9 +55,6 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         }
 
-        /**
-         * フィルターを適用
-         */
         applySalesFilter() {
             this.filteredData = [...this.data];
 
@@ -75,24 +65,17 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         }
 
-        /**
-         * 営業リスト表示更新
-         */
         updateSalesListDisplay() {
             this.applySalesFilter();
             this.renderSalesListItems();
         }
 
-        /**
-         * 営業リスト項目を描画（表形式・リンク対応）
-         */
         renderSalesListItems() {
             const salesListItems = document.getElementById('salesListItems');
             const salesNoDataMessage = document.getElementById('salesNoDataMessage');
 
             if (!salesListItems) return;
 
-            // データなしメッセージを非表示
             if (salesNoDataMessage) salesNoDataMessage.style.display = 'none';
 
             if (this.filteredData.length === 0) {
@@ -101,12 +84,10 @@ document.addEventListener('DOMContentLoaded', function() {
                 return;
             }
 
-            // ページ用データを取得
             const startIndex = (this.currentPage - 1) * this.itemsPerPage;
             const endIndex = Math.min(startIndex + this.itemsPerPage, this.filteredData.length);
             const pageData = this.filteredData.slice(startIndex, endIndex);
 
-            // 表形式のデータを生成（ファイル名をリンクに）
             salesListItems.innerHTML = pageData.map(item => `
                 <tr>
                     <td>
@@ -119,59 +100,154 @@ document.addEventListener('DOMContentLoaded', function() {
                 </tr>
             `).join('');
 
-            // リンククリック時のイベントリスナー追加
             this.setupFileLinks();
         }
 
-        /**
-         * ファイルリンクのイベントリスナー設定
-         */
         setupFileLinks() {
             const fileLinks = document.querySelectorAll('.sales-file-link');
             fileLinks.forEach(link => {
                 link.addEventListener('click', (e) => {
                     const fileName = e.target.textContent;
-                    const fileUrl = e.target.getAttribute('href');
-                    
-                    // トースト通知でダウンロード開始を表示
                     showToast(`ファイル「${fileName}」をダウンロード中...`, 'info');
-                    
-                    // リンクは通常通り新しいタブで開く
-                    // e.preventDefault() は使用しない
                 });
             });
         }
 
-        /**
-         * 総ページ数取得
-         */
-        getSalesTotalPages() {
-            return Math.ceil(this.filteredData.length / this.itemsPerPage);
-        }
-
-        /**
-         * 営業リストタブがアクティブになった時の処理
-         */
         onSalesListTabActivated() {
             this.updateSalesListDisplay();
-            showToast('営業リストを表示しました', 'info');
         }
     }
 
-
     // ====================================
-    // Supabase設定とクライアント初期化は services/auth.service.js で管理
-    // ====================================
-
-    // ====================================
-    // ユーティリティ関数の定義
+    // 送信先リスト管理用プロフィール選択クラス（最適化版）
     // ====================================
     
-    /**
-     * トーストメッセージを表示
-     * @param {string} message - 表示メッセージ
-     * @param {string} type - メッセージタイプ
-     */
+    class UrlProfileManager {
+        constructor() {
+            this.selectedProfileId = null;
+            this.profiles = [];
+            this.initialize();
+        }
+
+        async initialize() {
+            await this.loadProfiles();
+            this.setupEventListeners();
+            this.setupStorageWatcher();
+        }
+
+        setupEventListeners() {
+            const urlProfileSelect = getElement('urlProfileSelect');
+            if (!urlProfileSelect) return;
+
+            urlProfileSelect.addEventListener('change', (e) => {
+                this.selectedProfileId = e.target.value;
+                this.saveSelection();
+                
+                if (e.target.value) {
+                    const selectedText = e.target.options[e.target.selectedIndex].text;
+                    showToast(`プロフィール「${selectedText}」を選択しました`, 'info');
+                }
+            });
+        }
+
+        setupStorageWatcher() {
+            chrome.storage.onChanged.addListener((changes, areaName) => {
+                if (areaName === 'local' && changes.optionPatterns) {
+                    this.loadProfiles();
+                }
+            });
+        }
+
+        async loadProfiles() {
+            try {
+                const result = await chrome.storage.local.get(['optionPatterns', 'urlSelectedProfile']);
+                this.profiles = result.optionPatterns || [];
+                this.selectedProfileId = result.urlSelectedProfile || null;
+                this.updateDropdown();
+            } catch (error) {
+                console.error('Failed to load profiles:', error);
+                showToast('プロフィールの読み込みに失敗しました', 'error');
+            }
+        }
+
+        // profile-manager.jsの実装パターンを参考にした最適化版
+        updateDropdown() {
+            const urlProfileSelect = getElement('urlProfileSelect');
+            if (!urlProfileSelect) return;
+
+            // 現在の選択値を保持
+            const currentValue = urlProfileSelect.value;
+            
+            // ドロップダウンをクリア
+            urlProfileSelect.innerHTML = '';
+
+            // プロフィール選択肢を追加（profile-manager.jsと同じパターン）
+            this.profiles.forEach(profile => {
+                const option = document.createElement('option');
+                option.value = profile.id;
+                option.textContent = profile.title; // profile-manager.jsと同じくtitleフィールドを使用
+                urlProfileSelect.appendChild(option);
+            });
+
+            // 選択状態を復元
+            if (this.selectedProfileId && this.profiles.find(p => p.id === this.selectedProfileId)) {
+                urlProfileSelect.value = this.selectedProfileId;
+            } else if (this.profiles.length > 0) {
+                // プロフィールが存在する場合は最初のプロフィールを選択
+                this.selectedProfileId = this.profiles[0].id;
+                urlProfileSelect.value = this.selectedProfileId;
+                this.saveSelection();
+            }
+        }
+
+        async saveSelection() {
+            try {
+                await chrome.storage.local.set({ 'urlSelectedProfile': this.selectedProfileId });
+                
+                // 送信機能で使用するプロフィールとして設定
+                if (this.selectedProfileId) {
+                    const selectedProfile = this.getSelectedProfile();
+                    if (selectedProfile) {
+                        await chrome.storage.local.set({ 'selectedPattern': this.selectedProfileId });
+                    }
+                }
+            } catch (error) {
+                console.error('Failed to save profile selection:', error);
+            }
+        }
+
+        getSelectedProfile() {
+            if (!this.selectedProfileId) return null;
+            return this.profiles.find(profile => profile.id === this.selectedProfileId);
+        }
+
+        validateSelectedProfile() {
+            const selectedProfile = this.getSelectedProfile();
+            if (!selectedProfile) {
+                showToast('送信実行前にプロフィールを選択してください', 'warning');
+                
+                const urlProfileSelect = getElement('urlProfileSelect');
+                if (urlProfileSelect) {
+                    urlProfileSelect.focus();
+                    urlProfileSelect.style.border = '2px solid #f4b400';
+                    setTimeout(() => {
+                        urlProfileSelect.style.border = '';
+                    }, 3000);
+                }
+                return false;
+            }
+            return true;
+        }
+
+        async refreshOnTabSwitch() {
+            await this.loadProfiles();
+        }
+    }
+
+    // ====================================
+    // ユーティリティ関数
+    // ====================================
+    
     function showToast(message, type = 'info') {
         const toast = getElement('toast');
         const toastContent = document.querySelector('.toast-content');
@@ -187,18 +263,8 @@ document.addEventListener('DOMContentLoaded', function() {
         }, 3000);
     }
 
-    // ====================================
-    // DOM要素取得のヘルパー関数
-    // ====================================
-    
-    /**
-     * 要素を取得する
-     * @param {string} id - 要素のID
-     * @returns {Element|null} DOM要素
-     */
     function getElement(id) {
-        const element = document.getElementById(id);
-        return element;
+        return document.getElementById(id);
     }
 
     // ====================================
@@ -214,143 +280,16 @@ document.addEventListener('DOMContentLoaded', function() {
     const settingsManager = new SettingsManager(showToast, getElement);
     const authService = new AuthService(showToast, getElement);
     
-    // 営業リスト管理インスタンス初期化
+    // 営業リスト・プロフィール管理インスタンス
     const salesListManager = new SalesListManager();
-    
-    // 送信先リスト管理用プロフィール選択管理クラス
-    class UrlProfileManager {
-        constructor() {
-            this.selectedProfileId = null;
-            this.profiles = [];
-            this.initializeUrlProfileSelect();
-        }
-
-        /**
-         * 送信先リスト管理用プロフィール選択の初期化
-         */
-        async initializeUrlProfileSelect() {
-            const urlProfileSelect = getElement('urlProfileSelect');
-            if (!urlProfileSelect) return;
-
-            // プロフィール変更イベントリスナー
-            urlProfileSelect.addEventListener('change', (e) => {
-                this.selectedProfileId = e.target.value;
-                this.saveSelectedProfile();
-                showToast(`プロフィール「${e.target.options[e.target.selectedIndex].text}」を選択しました`, 'info');
-            });
-
-            // 初期プロフィールを読み込み
-            await this.loadUrlProfiles();
-        }
-
-        /**
-         * プロフィール一覧を読み込み
-         */
-        async loadUrlProfiles() {
-            try {
-                // ProfileManagerからプロフィール一覧を取得
-                const profileData = await storageService.getItem('optionPatterns') || [];
-                this.profiles = profileData;
-
-                // 保存された選択プロフィールを取得
-                const savedProfileId = await storageService.getItem('urlSelectedProfile');
-                this.selectedProfileId = savedProfileId;
-
-                // ドロップダウンを更新
-                this.updateUrlProfileSelect();
-            } catch (error) {
-                console.error('Failed to load URL profiles:', error);
-                showToast('プロフィールの読み込みに失敗しました', 'error');
-            }
-        }
-
-        /**
-         * プロフィール選択ドロップダウンを更新
-         */
-        updateUrlProfileSelect() {
-            const urlProfileSelect = getElement('urlProfileSelect');
-            if (!urlProfileSelect) return;
-
-            // 選択肢をクリア
-            urlProfileSelect.innerHTML = '';
-
-            // デフォルト選択肢を追加
-            const defaultOption = document.createElement('option');
-            defaultOption.value = '';
-            defaultOption.textContent = 'プロフィールを選択してください';
-            urlProfileSelect.appendChild(defaultOption);
-
-            // プロフィール選択肢を追加
-            this.profiles.forEach(profile => {
-                const option = document.createElement('option');
-                option.value = profile.id;
-                option.textContent = profile.name || `プロフィール ${profile.id}`;
-                urlProfileSelect.appendChild(option);
-            });
-
-            // 保存された選択プロフィールを復元
-            if (this.selectedProfileId) {
-                urlProfileSelect.value = this.selectedProfileId;
-            }
-        }
-
-        /**
-         * 選択されたプロフィールを保存
-         */
-        async saveSelectedProfile() {
-            try {
-                await storageService.setItem('urlSelectedProfile', this.selectedProfileId);
-            } catch (error) {
-                console.error('Failed to save selected profile:', error);
-            }
-        }
-
-        /**
-         * 現在選択されているプロフィールを取得
-         */
-        getSelectedProfile() {
-            if (!this.selectedProfileId) return null;
-            return this.profiles.find(profile => profile.id === this.selectedProfileId);
-        }
-
-        /**
-         * プロフィール一覧を更新（ProfileManager連携用）
-         */
-        async refreshProfiles() {
-            await this.loadUrlProfiles();
-        }
-
-        /**
-         * 送信実行時に選択されたプロフィールのバリデーション
-         */
-        validateSelectedProfile() {
-            const selectedProfile = this.getSelectedProfile();
-            if (!selectedProfile) {
-                showToast('送信実行前にプロフィールを選択してください', 'warning');
-                return false;
-            }
-            return true;
-        }
-    }
-    
-    // 送信先リスト管理用プロフィール選択インスタンス初期化
     const urlProfileManager = new UrlProfileManager();
     
-    // BatchServiceは他のサービスへの依存性があるため、後で初期化
     let batchService = null;
-
-    // ====================================
-    // グローバル変数（バッチ処理関連は services/batch.service.js に移動済み）
-    // ====================================
 
     // ====================================
     // デバイスID管理
     // ====================================
     
-    /**
-     * デバイスIDを取得または生成する（StorageService経由）
-     * @returns {Promise<string>} デバイスID
-     */
     async function getDeviceId() {
         try {
             let deviceId = await storageService.getDeviceId();
@@ -365,85 +304,44 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // ====================================
-    // データベースクラスは shared/database.js からインポート済み
-    // ====================================
-
-    // ====================================
-    // デフォルト除外ドメイン設定は modules/settings-manager.js から取得
-    // ====================================
-
-    // ====================================
     // DOM要素の取得
     // ====================================
     
-    // ナビゲーション関連
     const navItems = document.querySelectorAll('.nav-item');
     const tabContents = document.querySelectorAll('.tab-content');
-    
-    // ダッシュボード関連（エラー修正: refreshDashboardButton の定義追加）
     const refreshDashboardButton = getElement('refreshDashboard');
-    
-    // 認証関連は services/auth.service.js で管理
-
-    // URL管理関連は modules/url-manager.js で管理
-
-    // プロフィール管理関連は modules/profile-manager.js で管理
-
-    // 送信結果関連は modules/results-manager.js で管理
-
-    // 設定関連は modules/settings-manager.js で管理
-
-    // ダッシュボード関連は modules/dashboard.js で管理
 
     // ====================================
     // タブ切り替え機能
     // ====================================
     
-    /**
-     * 指定されたタブに切り替える
-     * @param {string} tabId - タブのID
-     */
-    function switchToTab(tabId) {
-        // 全てのナビゲーション項目とタブコンテンツから active クラスを削除
+    async function switchToTab(tabId) {
         navItems.forEach(navItem => navItem.classList.remove('active'));
         tabContents.forEach(content => content.classList.remove('active'));
 
-        // 対象のナビゲーション項目とタブコンテンツに active クラスを追加
         const targetNavItem = document.querySelector(`.nav-item[data-tab="${tabId}"]`);
         const targetTab = document.getElementById(tabId);
 
-        if (targetNavItem) {
-            targetNavItem.classList.add('active');
-        }
-        if (targetTab) {
-            targetTab.classList.add('active');
-        }
+        if (targetNavItem) targetNavItem.classList.add('active');
+        if (targetTab) targetTab.classList.add('active');
 
-        // 営業リストタブがアクティブになった場合の特別処理
+        // タブ固有の処理
         if (tabId === 'sales-list') {
             salesListManager.onSalesListTabActivated();
+        } else if (tabId === 'url-list') {
+            await urlProfileManager.refreshOnTabSwitch();
         }
 
-        // 送信先リスト管理タブがアクティブになった場合の特別処理
-        if (tabId === 'url-list') {
-            urlProfileManager.refreshProfiles();
-        }
-
-        // URLパラメータを更新
         window.history.replaceState(null, '', `?tab=${tabId}`);
     }
 
-    /**
-     * 初期タブを設定する
-     */
-    function setInitialTab() {
+    async function setInitialTab() {
         const urlParams = new URLSearchParams(window.location.search);
         const tabParam = urlParams.get('tab');
         const targetTab = tabParam || 'dashboard';
         
-        switchToTab(targetTab);
+        await switchToTab(targetTab);
 
-        // 結果タブの場合、特定の結果IDが指定されていれば選択
         if (tabParam === 'results') {
             const resultId = urlParams.get('id');
             if (resultId) {
@@ -455,16 +353,9 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // ====================================
-    // 停止状態管理機能は services/batch.service.js に移動済み
-    // ====================================
-
-    // ====================================
     // 共通関数
     // ====================================
     
-    /**
-     * ダッシュボードを更新する
-     */
     async function refreshDashboard() {
         try {
             if (dashboard) {
@@ -479,12 +370,8 @@ document.addEventListener('DOMContentLoaded', function() {
     // 初期化処理
     // ====================================
     
-    /**
-     * アプリケーションの初期化
-     */
     async function init() {
         try {
-            // BatchServiceを初期化（依存性注入）
             batchService = new BatchService({
                 showToast: showToast,
                 urlManager: urlManager,
@@ -493,7 +380,6 @@ document.addEventListener('DOMContentLoaded', function() {
                 refreshDashboard: refreshDashboard
             });
             
-            // BatchServiceのProgressMonitorにStorageServiceを設定
             if (batchService.progressMonitor) {
                 batchService.progressMonitor.setStorageService(storageService);
             }
@@ -501,34 +387,26 @@ document.addEventListener('DOMContentLoaded', function() {
             await authService.initializeAuth();
             await urlManager.loadUrlList();
             await profileManager.loadProfiles();
-            
-            // 送信先リスト管理用プロフィール選択を更新
-            await urlProfileManager.refreshProfiles();
-            
             await resultsManager.loadResults();
             await settingsManager.loadAllSettings();
             await refreshDashboard();
             
-            // バッチ処理の状態復元
             await batchService.checkAndRestoreSendingState();
             
-            // 実行ボタンのイベントリスナー設定
+            // 送信実行ボタンにプロフィール選択バリデーション機能を統合
             const executeFromUrlTabButton = getElement('executeFromUrlTab');
             if (executeFromUrlTabButton) {
-                // 送信実行時のプロフィール選択バリデーション機能を統合
                 const originalExecuteHandler = batchService.getExecuteButtonHandler();
                 const enhancedExecuteHandler = () => {
-                    // プロフィール選択のバリデーション
                     if (!urlProfileManager.validateSelectedProfile()) {
-                        return; // バリデーション失敗時は実行を中止
+                        return;
                     }
-                    // バリデーション成功時は元の実行処理を継続
                     originalExecuteHandler();
                 };
                 urlManager.setExecuteButtonToExecuteState(enhancedExecuteHandler);
             }
             
-            setInitialTab();
+            await setInitialTab();
         } catch (error) {
             showToast('初期化中にエラーが発生しました', 'error');
             console.error('Initialization error:', error);
@@ -539,74 +417,22 @@ document.addEventListener('DOMContentLoaded', function() {
     // イベントリスナーの設定
     // ====================================
     
-    // 初期化を実行
     init();
 
-    // ナビゲーションタブのイベントリスナー
     navItems.forEach(item => {
-        item.addEventListener('click', function() {
+        item.addEventListener('click', async function() {
             const tabId = this.getAttribute('data-tab');
             if (tabId) {
-                switchToTab(tabId);
+                await switchToTab(tabId);
             }
         });
     });
 
-    // URL管理のイベントリスナーは modules/url-manager.js で設定済み
-    // executeFromUrlTabButton のイベントリスナーは初期化処理内で設定
-
-    // プロフィール管理のイベントリスナーは modules/profile-manager.js で設定済み
-
-    // 送信結果のイベントリスナーは modules/results-manager.js で設定済み
-
-    // 設定のイベントリスナーは modules/settings-manager.js で設定済み
-
-    // ダッシュボードのイベントリスナー（エラー修正: 適切な位置に配置）
     if (refreshDashboardButton) {
         refreshDashboardButton.addEventListener('click', async function() {
             await refreshDashboard();
             showToast('ダッシュボードを更新しました', 'info');
         });
     }
-
-    // ====================================
-    // ライセンス・認証管理機能は services/auth.service.js に移動済み
-    // ====================================
-
-    // ====================================
-    // トースト通知
-    // ====================================
-    
-    // showToast関数は上部で定義済み
-
-    // ====================================
-    // URL管理機能は modules/url-manager.js に移動済み
-    // ====================================
-
-    // ====================================
-    // プロフィール管理機能は modules/profile-manager.js に移動済み
-    // ====================================
-
-    // ====================================
-    // 送信結果管理機能は modules/results-manager.js に移動済み
-    // ====================================
-
-    // ====================================
-    // 設定管理機能は modules/settings-manager.js に移動済み
-    // ====================================
-
-    // ====================================
-    // ダッシュボード機能
-    // ====================================
-    
-    // refreshDashboard関数は上部で定義済み
-
-    // ====================================
-    // 送信実行機能は services/batch.service.js に移動済み
-    // ====================================
-
-    // ====================================
-    // 進捗監視機能は services/batch.service.js に移動済み
-    // ====================================
 
 });
