@@ -129,7 +129,8 @@ export class UrlManager {
 
     setExecuteButtonToStopState(stopHandler) {
         if (this.elements.executeFromUrlTabButton) {
-            this.elements.executeFromUrlTabButton.innerHTML = '<img class="icon" src="../assets/icons/stop.png" alt="送信停止" />送信停止';
+            // 停止状態：警告色、アイコンなし
+            this.elements.executeFromUrlTabButton.textContent = '送信停止';
             this.elements.executeFromUrlTabButton.className = 'stop-button';
             this.elements.executeFromUrlTabButton.disabled = false;
             
@@ -144,8 +145,9 @@ export class UrlManager {
 
     setExecuteButtonToExecuteState(executeHandler) {
         if (this.elements.executeFromUrlTabButton) {
-            this.elements.executeFromUrlTabButton.innerHTML = '<img class="icon" src="../assets/icons/play.png" alt="送信開始" />送信開始';
-            this.elements.executeFromUrlTabButton.className = 'success-button';
+            // ✅ 修正：HTMLで設定した青色ボタン、アイコンなしを維持
+            this.elements.executeFromUrlTabButton.textContent = '送信開始';
+            this.elements.executeFromUrlTabButton.className = 'primary-button';
             this.elements.executeFromUrlTabButton.disabled = false;
             
             if (this.originalStopHandler) {
@@ -159,8 +161,9 @@ export class UrlManager {
 
     setExecuteButtonToDisabledState() {
         if (this.elements.executeFromUrlTabButton) {
+            // 無効状態：グレー、アイコンなし
             this.elements.executeFromUrlTabButton.disabled = true;
-            this.elements.executeFromUrlTabButton.innerHTML = '<img class="icon" src="../assets/icons/stop.png" alt="停止中" />停止中...';
+            this.elements.executeFromUrlTabButton.textContent = '停止中...';
             this.elements.executeFromUrlTabButton.className = 'secondary-button';
         }
     }
