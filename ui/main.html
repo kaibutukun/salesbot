@@ -151,29 +151,27 @@
                         </div>
                     </div>
                     
-                    <div class="url-management">
-                        <div class="form-group">
-                            <label for="urlListTextarea">送信先URL一覧 (1行に1URL)</label>
-                            <textarea 
-                                id="urlListTextarea" 
-                                class="url-list-textarea" 
-                                rows="20" 
-                                cols="100" 
-                                placeholder="https://example.com">
-                            </textarea>
+                    <!-- 送信先URL一覧（白枠削除） -->
+                    <label for="urlListTextarea">送信先URL一覧 (1行に1URL)</label>
+                    <textarea 
+                        id="urlListTextarea" 
+                        class="url-list-textarea" 
+                        rows="20" 
+                        cols="100" 
+                        placeholder="https://example.com">
+                    </textarea>
+                    
+                    <!-- ボタン群（白枠削除） -->
+                    <div class="url-actions">
+                        <div class="url-actions-top">
+                            <button id="saveUrlList" class="primary-button">設定を保存</button>
+                            <button id="clearUrlList" class="danger-button">クリア</button>
                         </div>
-                        
-                        <div class="url-actions">
-                            <div class="url-actions-top">
-                                <button id="saveUrlList" class="primary-button">設定を保存</button>
-                                <button id="clearUrlList" class="danger-button">クリア</button>
-                            </div>
-                            <div class="url-actions-bottom">
-                                <button id="executeFromUrlTab" class="success-button">
-                                    <img class="icon" src="../assets/icons/play.png" alt="送信開始" />
-                                    送信開始
-                                </button>
-                            </div>
+                        <div class="url-actions-bottom">
+                            <button id="executeFromUrlTab" class="success-button">
+                                <img class="icon" src="../assets/icons/play.png" alt="送信開始" />
+                                送信開始
+                            </button>
                         </div>
                     </div>
                 </div>
@@ -201,28 +199,22 @@
                         </select>
                     </div>
 
-                    <!-- 営業リスト表示エリア -->
-                    <div class="url-management">
-                        <div class="form-group">
-                            <div id="salesListContainer" class="url-list-display">
-                                <div id="salesNoDataMessage" class="no-results" style="display: none;">
-                                    営業リストデータがありません
-                                </div>
-                                <table id="salesListTable" class="sales-list-table">
-                                    <thead>
-                                        <tr>
-                                            <th>ファイル名</th>
-                                            <th>業種</th>
-                                            <th>全国合計</th>
-                                        </tr>
-                                    </thead>
-                                    <tbody id="salesListItems">
-                                        <!-- 動的に生成される営業リスト項目 -->
-                                    </tbody>
-                                </table>
-                            </div>
-                        </div>
+                    <!-- 営業リスト表示エリア（白枠削除） -->
+                    <div id="salesNoDataMessage" class="no-results" style="display: none;">
+                        営業リストデータがありません
                     </div>
+                    <table id="salesListTable" class="sales-list-table">
+                        <thead>
+                            <tr>
+                                <th>ファイル名</th>
+                                <th>業種</th>
+                                <th>全国合計</th>
+                            </tr>
+                        </thead>
+                        <tbody id="salesListItems">
+                            <!-- 動的に生成される営業リスト項目 -->
+                        </tbody>
+                    </table>
                 </div>
 
                 <!-- ====================================
