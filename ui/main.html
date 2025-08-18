@@ -138,85 +138,6 @@
                 </div>
 
                 <!-- ====================================
-                     送信先リスト管理タブ
-                     ==================================== -->
-                <div id="url-list" class="tab-content">
-                    <h2>送信先リスト管理</h2>
-                    
-                    <!-- プロフィール選択 -->
-                    <div class="profile-selector">
-                        <label for="urlProfileSelect">使用するプロフィール</label>
-                        <div class="profile-select-wrapper">
-                            <select id="urlProfileSelect" class="profile-select"></select>
-                        </div>
-                    </div>
-                    
-                    <!-- 送信先URL一覧（ラベル行にクリアボタン配置） -->
-                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
-                        <label for="urlListTextarea">送信先URL一覧 (1行に1URL)</label>
-                        <button id="clearUrlList" class="danger-button">クリア</button>
-                    </div>
-                    <textarea 
-                        id="urlListTextarea" 
-                        class="url-list-textarea" 
-                        rows="15" 
-                        style="width: 100%; max-width: none;"
-                        placeholder="https://example.com">
-                    </textarea>
-                    
-                    <!-- ボタン群（送信開始と送信停止） -->
-                    <div class="url-actions">
-                        <button id="executeFromUrlTab" class="primary-button">
-                            送信開始
-                        </button>
-                        <button id="stopFromUrlTab" class="danger-button" style="margin-left: 12px;">
-                            送信停止
-                        </button>
-                    </div>
-                </div>
-
-                <!-- ====================================
-                     営業リストタブ
-                     ==================================== -->
-                <div id="sales-list" class="tab-content">
-                    <h2>営業リスト</h2>
-                    
-                    <!-- フィルター（白枠なし） -->
-                    <div class="sales-filter-only">
-                        <select id="industryFilter" class="industry-filter-select">
-                            <option value="">すべて</option>
-                            <option value="IT・ソフトウェア">IT・ソフトウェア</option>
-                            <option value="金融">金融</option>
-                            <option value="製造業">製造業</option>
-                            <option value="商社">商社</option>
-                            <option value="サービス業">サービス業</option>
-                            <option value="建設・不動産">建設・不動産</option>
-                            <option value="小売・流通">小売・流通</option>
-                            <option value="医療・介護">医療・介護</option>
-                            <option value="教育">教育</option>
-                            <option value="その他">その他</option>
-                        </select>
-                    </div>
-
-                    <!-- 営業リスト表示エリア（白枠削除） -->
-                    <div id="salesNoDataMessage" class="no-results" style="display: none;">
-                        営業リストデータがありません
-                    </div>
-                    <table id="salesListTable" class="sales-list-table">
-                        <thead>
-                            <tr>
-                                <th>ファイル名</th>
-                                <th>業種</th>
-                                <th>全国合計</th>
-                            </tr>
-                        </thead>
-                        <tbody id="salesListItems">
-                            <!-- 動的に生成される営業リスト項目 -->
-                        </tbody>
-                    </table>
-                </div>
-
-                <!-- ====================================
                      フォーム入力データ管理タブ
                      ==================================== -->
                 <div id="profiles" class="tab-content">
@@ -412,6 +333,44 @@
                 </div>
 
                 <!-- ====================================
+                     送信先リスト管理タブ
+                     ==================================== -->
+                <div id="url-list" class="tab-content">
+                    <h2>送信先リスト管理</h2>
+                    
+                    <!-- プロフィール選択 -->
+                    <div class="profile-selector">
+                        <label for="urlProfileSelect">使用するプロフィール</label>
+                        <div class="profile-select-wrapper">
+                            <select id="urlProfileSelect" class="profile-select"></select>
+                        </div>
+                    </div>
+                    
+                    <!-- 送信先URL一覧（ラベル行にクリアボタン配置） -->
+                    <div style="display: flex; justify-content: space-between; align-items: center; margin-bottom: 8px;">
+                        <label for="urlListTextarea">送信先URL一覧 (1行に1URL)</label>
+                        <button id="clearUrlList" class="danger-button">クリア</button>
+                    </div>
+                    <textarea 
+                        id="urlListTextarea" 
+                        class="url-list-textarea" 
+                        rows="15" 
+                        style="width: 100%; max-width: none;"
+                        placeholder="https://example.com">
+                    </textarea>
+                    
+                    <!-- ボタン群（送信開始と送信停止） -->
+                    <div class="url-actions">
+                        <button id="executeFromUrlTab" class="primary-button">
+                            送信開始
+                        </button>
+                        <button id="stopFromUrlTab" class="danger-button" style="margin-left: 12px;">
+                            送信停止
+                        </button>
+                    </div>
+                </div>
+
+                <!-- ====================================
                      送信結果タブ
                      ==================================== -->
                 <div id="results" class="tab-content">
@@ -449,6 +408,47 @@
                             </div>
                         </div>
                     </div>
+                </div>
+
+                <!-- ====================================
+                     営業リストタブ
+                     ==================================== -->
+                <div id="sales-list" class="tab-content">
+                    <h2>営業リスト</h2>
+                    
+                    <!-- フィルター（白枠なし） -->
+                    <div class="sales-filter-only">
+                        <select id="industryFilter" class="industry-filter-select">
+                            <option value="">すべて</option>
+                            <option value="IT・ソフトウェア">IT・ソフトウェア</option>
+                            <option value="金融">金融</option>
+                            <option value="製造業">製造業</option>
+                            <option value="商社">商社</option>
+                            <option value="サービス業">サービス業</option>
+                            <option value="建設・不動産">建設・不動産</option>
+                            <option value="小売・流通">小売・流通</option>
+                            <option value="医療・介護">医療・介護</option>
+                            <option value="教育">教育</option>
+                            <option value="その他">その他</option>
+                        </select>
+                    </div>
+
+                    <!-- 営業リスト表示エリア（白枠削除） -->
+                    <div id="salesNoDataMessage" class="no-results" style="display: none;">
+                        営業リストデータがありません
+                    </div>
+                    <table id="salesListTable" class="sales-list-table">
+                        <thead>
+                            <tr>
+                                <th>ファイル名</th>
+                                <th>業種</th>
+                                <th>全国合計</th>
+                            </tr>
+                        </thead>
+                        <tbody id="salesListItems">
+                            <!-- 動的に生成される営業リスト項目 -->
+                        </tbody>
+                    </table>
                 </div>
 
                 <!-- ====================================
@@ -570,7 +570,7 @@
         <div class="toast-content"></div>
     </div>
 
-    <!-- JavaScript読み込み -->
+    <!-- JavaScriptレンダー -->
     <script type="module" src="main.js"></script>
 </body>
 </html>

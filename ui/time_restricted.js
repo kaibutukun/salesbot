@@ -1,3 +1,64 @@
+/**
+ * メインタブに戻る
+ * @param {string|null} tabParam - タブパラメータ（オプション）
+ */
+async function returnToMainTab(tabParam = null) {
+    try {
+        // 既存のメインタブを検索
+        const tabs = await chrome.tabs.query({
+            url: chrome.runtime.getURL('ui/main.html') + '*'
+        });
+
+        if (tabs.length > 0) {
+            // 既存のメインタブがある場合
+            const mainTab = tabs[0];
+            
+            if (tabParam) {
+                await chrome.tabs.update(mainTab.id, {
+                    url: chrome.runtime.getURL('ui/main.html') + tabParam,
+                    active: true
+                });
+            } else {
+                await chrome.tabs.update(mainTab.id, { active: true });
+            }
+
+            // 現在のタブを閉じる
+            const currentTab = await chrome.tabs.getCurrent();
+            if (currentTab) {
+                chrome.tabs.remove(currentTab.id);
+            }
+        } else {
+            // 既存のメインタブがない場合、新しく作成
+            if (tabParam) {
+                chrome.tabs.create({
+                    url: chrome.runtime.getURL('ui/main.html') + tabParam
+                });
+            } else {
+                chrome.tabs.create({
+                    url: chrome.runtime.getURL('ui/main.html')
+                });
+            }
+
+            // 現在のタブを閉じる
+            const currentTab = await chrome.tabs.getCurrent();
+            if (currentTab) {
+                chrome.tabs.remove(currentTab.id);
+            }
+        }
+    } catch (error) {
+        // エラー時は新しいタブを作成
+        if (tabParam) {
+            chrome.tabs.create({
+                url: chrome.runtime.getURL('ui/main.html') + tabParam
+            });
+        } else {
+            chrome.tabs.create({
+                url: chrome.runtime.getURL('ui/main.html')
+            });
+        }
+    }
+}
+
 document.addEventListener('DOMContentLoaded', function() {
     
     // ====================================
@@ -168,14 +229,14 @@ document.addEventListener('DOMContentLoaded', function() {
      * トップに戻るボタンのイベントリスナー
      */
     document.getElementById('backToMain').addEventListener('click', function() {
-        chrome.tabs.update({ url: 'ui/main.html' });
+        returnToMainTab();
     });
 
     /**
      * 設定を変更するボタンのイベントリスナー
      */
     document.getElementById('changeSettings').addEventListener('click', function() {
-        chrome.tabs.update({ url: 'ui/main.html?tab=settings' });
+        returnToMainTab('?tab=settings');
     });
 
 });
