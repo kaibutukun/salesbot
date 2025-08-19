@@ -10,8 +10,8 @@ export class UrlManager {
         this.showToastFunction = showToastFn;
         this.getElementFunction = getElementFn;
         this.refreshDashboardFunction = refreshDashboardFn;
-        this.originalExecuteHandler = null;
-        this.originalStopHandler = null;
+        this.executeHandler = null;
+        this.stopHandler = null;
         this.elements = this.initializeElements();
         this.setupEventListeners();
     }
@@ -21,7 +21,8 @@ export class UrlManager {
             urlListTextarea: this.getElement('urlListTextarea'),
             saveUrlListButton: this.getElement('saveUrlList'),
             clearUrlListButton: this.getElement('clearUrlList'),
-            executeFromUrlTabButton: this.getElement('executeFromUrlTab')
+            executeFromUrlTabButton: this.getElement('executeFromUrlTab'),
+            stopFromUrlTabButton: this.getElement('stopFromUrlTab')
         };
     }
 
@@ -127,44 +128,90 @@ export class UrlManager {
         return this.getCurrentUrls().length === 0;
     }
 
-    setExecuteButtonToStopState(stopHandler) {
-        if (this.elements.executeFromUrlTabButton) {
-            // 停止状態：警告色、アイコンなし
-            this.elements.executeFromUrlTabButton.textContent = '送信停止';
-            this.elements.executeFromUrlTabButton.className = 'stop-button';
-            this.elements.executeFromUrlTabButton.disabled = false;
-            
-            if (this.originalExecuteHandler) {
-                this.elements.executeFromUrlTabButton.removeEventListener('click', this.originalExecuteHandler);
-            }
-            
-            this.originalStopHandler = stopHandler;
-            this.elements.executeFromUrlTabButton.addEventListener('click', stopHandler);
+    // ====================================
+    // ボタン状態管理（色固定版）
+    // ====================================
+
+    /**
+     * イベントハンドラーを安全に削除
+     */
+    removeEventHandlers() {
+        if (this.executeHandler && this.elements.executeFromUrlTabButton) {
+            this.elements.executeFromUrlTabButton.removeEventListener('click', this.executeHandler);
+        }
+        if (this.stopHandler && this.elements.stopFromUrlTabButton) {
+            this.elements.stopFromUrlTabButton.removeEventListener('click', this.stopHandler);
         }
     }
 
-    setExecuteButtonToExecuteState(executeHandler) {
+    /**
+     * 送信開始状態：開始ボタン有効、停止ボタン無効
+     * @param {Function} executeHandler - 送信開始ハンドラー
+     */
+    setButtonsToExecuteState(executeHandler) {
+        this.removeEventHandlers();
+
+        // 送信開始ボタン：有効（常に青色）
         if (this.elements.executeFromUrlTabButton) {
-            // ✅ 修正：HTMLで設定した青色ボタン、アイコンなしを維持
             this.elements.executeFromUrlTabButton.textContent = '送信開始';
             this.elements.executeFromUrlTabButton.className = 'primary-button';
             this.elements.executeFromUrlTabButton.disabled = false;
             
-            if (this.originalStopHandler) {
-                this.elements.executeFromUrlTabButton.removeEventListener('click', this.originalStopHandler);
-            }
-            
-            this.originalExecuteHandler = executeHandler;
+            this.executeHandler = executeHandler;
             this.elements.executeFromUrlTabButton.addEventListener('click', executeHandler);
+        }
+
+        // 送信停止ボタン：無効（常に赤色）
+        if (this.elements.stopFromUrlTabButton) {
+            this.elements.stopFromUrlTabButton.textContent = '送信停止';
+            this.elements.stopFromUrlTabButton.className = 'danger-button';
+            this.elements.stopFromUrlTabButton.disabled = true;
         }
     }
 
-    setExecuteButtonToDisabledState() {
+    /**
+     * 送信中状態：開始ボタン無効、停止ボタン有効
+     * @param {Function} stopHandler - 送信停止ハンドラー
+     */
+    setButtonsToSendingState(stopHandler) {
+        this.removeEventHandlers();
+
+        // 送信開始ボタン：無効（常に青色）
         if (this.elements.executeFromUrlTabButton) {
-            // 無効状態：グレー、アイコンなし
+            this.elements.executeFromUrlTabButton.textContent = '送信開始';
+            this.elements.executeFromUrlTabButton.className = 'primary-button';
             this.elements.executeFromUrlTabButton.disabled = true;
-            this.elements.executeFromUrlTabButton.textContent = '停止中...';
-            this.elements.executeFromUrlTabButton.className = 'secondary-button';
+        }
+
+        // 送信停止ボタン：有効（常に赤色）
+        if (this.elements.stopFromUrlTabButton) {
+            this.elements.stopFromUrlTabButton.textContent = '送信停止';
+            this.elements.stopFromUrlTabButton.className = 'danger-button';
+            this.elements.stopFromUrlTabButton.disabled = false;
+            
+            this.stopHandler = stopHandler;
+            this.elements.stopFromUrlTabButton.addEventListener('click', stopHandler);
+        }
+    }
+
+    /**
+     * 停止処理中状態：両方のボタンを無効
+     */
+    setButtonsToStoppingState() {
+        this.removeEventHandlers();
+
+        // 送信開始ボタン：無効（常に青色）
+        if (this.elements.executeFromUrlTabButton) {
+            this.elements.executeFromUrlTabButton.textContent = '送信開始';
+            this.elements.executeFromUrlTabButton.className = 'primary-button';
+            this.elements.executeFromUrlTabButton.disabled = true;
+        }
+
+        // 送信停止ボタン：無効（停止中表示、常に赤色）
+        if (this.elements.stopFromUrlTabButton) {
+            this.elements.stopFromUrlTabButton.textContent = '停止中...';
+            this.elements.stopFromUrlTabButton.className = 'danger-button';
+            this.elements.stopFromUrlTabButton.disabled = true;
         }
     }
 

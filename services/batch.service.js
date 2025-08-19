@@ -24,7 +24,7 @@ export class BatchService {
         this.refreshDashboardFunction = dependencies.refreshDashboard || null;
 
         // 内部状態
-        this.isStopButtonActive = false;
+        this.isSending = false;
 
         // Chrome runtime listener reference
         this.stopStateListener = null;
@@ -108,13 +108,12 @@ export class BatchService {
      * 停止完了時の処理
      */
     handleStopCompleted() {
-        // 停止ボタンを実行ボタンに戻す
-        if (this.isStopButtonActive && this.urlManager) {
-            this.urlManager.setExecuteButtonToExecuteState(() => this.executeButtonHandler());
-            this.isStopButtonActive = false;
-            if (this.dashboard) {
-                this.dashboard.setStopButtonActive(false);
-            }
+        // 送信状態をリセット
+        this.isSending = false;
+
+        // ボタンを実行状態に戻す
+        if (this.urlManager) {
+            this.urlManager.setButtonsToExecuteState(() => this.executeButtonHandler());
         }
 
         // 送信状態を更新
@@ -235,14 +234,11 @@ export class BatchService {
 
             // 送信進行状態を設定
             await chrome.storage.local.set({ sendingInProgress: true });
+            this.isSending = true;
 
-            // ボタンを停止ボタンに変更
+            // ボタンを送信中状態に変更
             if (this.urlManager) {
-                this.urlManager.setExecuteButtonToStopState(() => this.stopButtonHandler());
-            }
-            this.isStopButtonActive = true;
-            if (this.dashboard) {
-                this.dashboard.setStopButtonActive(true);
+                this.urlManager.setButtonsToSendingState(() => this.stopButtonHandler());
             }
 
             // 送信状態を更新
@@ -270,15 +266,7 @@ export class BatchService {
             this.showToast('送信開始に失敗しました: ' + error.message, 'error');
             
             // エラー時は状態をリセット
-            chrome.storage.local.remove('sendingInProgress');
-            
-            if (this.urlManager) {
-                this.urlManager.setExecuteButtonToExecuteState(() => this.executeButtonHandler());
-            }
-            this.isStopButtonActive = false;
-            if (this.dashboard) {
-                this.dashboard.setStopButtonActive(false);
-            }
+            this.resetToInitialState();
         }
     }
 
@@ -304,8 +292,9 @@ export class BatchService {
                 this.dashboard.updateSendingStatus('停止処理中...', false);
             }
 
+            // ボタンを停止中状態に変更
             if (this.urlManager) {
-                this.urlManager.setExecuteButtonToDisabledState();
+                this.urlManager.setButtonsToStoppingState();
             }
 
             chrome.storage.local.remove('sendingInProgress');
@@ -331,12 +320,9 @@ export class BatchService {
                     
                     if (!allProcessed) {
                         // 送信中状態を復元
+                        this.isSending = true;
                         if (this.urlManager) {
-                            this.urlManager.setExecuteButtonToStopState(() => this.stopButtonHandler());
-                        }
-                        this.isStopButtonActive = true;
-                        if (this.dashboard) {
-                            this.dashboard.setStopButtonActive(true);
+                            this.urlManager.setButtonsToSendingState(() => this.stopButtonHandler());
                         }
 
                         // 送信状態を更新
@@ -355,6 +341,21 @@ export class BatchService {
         }
     }
 
+    /**
+     * 初期状態にリセット
+     */
+    resetToInitialState() {
+        this.isSending = false;
+        chrome.storage.local.remove('sendingInProgress');
+        
+        if (this.urlManager) {
+            this.urlManager.setButtonsToExecuteState(() => this.executeButtonHandler());
+        }
+        if (this.dashboard) {
+            this.dashboard.updateSendingStatus('待機中', false);
+        }
+    }
+
     // ====================================
     // ProgressMonitorコールバック関数
     // ====================================
@@ -365,18 +366,17 @@ export class BatchService {
      */
     async handleProgressCompleted(progressInfo) {
         try {
+            // 送信状態をリセット
+            this.isSending = false;
+
             // ダッシュボードの状態更新
             if (this.dashboard) {
                 this.dashboard.updateSendingStatus('待機中', false);
             }
 
             // 実行ボタンを元に戻す
-            if (this.isStopButtonActive && this.urlManager) {
-                this.urlManager.setExecuteButtonToExecuteState(() => this.executeButtonHandler());
-                this.isStopButtonActive = false;
-                if (this.dashboard) {
-                    this.dashboard.setStopButtonActive(false);
-                }
+            if (this.urlManager) {
+                this.urlManager.setButtonsToExecuteState(() => this.executeButtonHandler());
             }
 
             // ダッシュボードを更新
@@ -438,9 +438,8 @@ export class BatchService {
      */
     getExecutionState() {
         return {
-            isStopButtonActive: this.isStopButtonActive,
-            isProgressMonitoring: this.progressMonitoringInterval !== null,
-            lastProgressState: { ...this.lastProgressState }
+            isSending: this.isSending,
+            isProgressMonitoring: this.progressMonitor ? this.progressMonitor.getMonitoringState().isMonitoring : false
         };
     }
 
@@ -509,20 +508,7 @@ export class BatchService {
             this.stopProgressMonitoring();
 
             // 状態をリセット
-            this.isStopButtonActive = false;
-
-            // ストレージをクリア
-            chrome.storage.local.remove('sendingInProgress');
-
-            // UIを初期状態に戻す
-            if (this.urlManager) {
-                this.urlManager.setExecuteButtonToExecuteState(() => this.executeButtonHandler());
-            }
-            if (this.dashboard) {
-                this.dashboard.setStopButtonActive(false);
-                this.dashboard.updateSendingStatus('待機中', false);
-                this.dashboard.resetProgress();
-            }
+            this.resetToInitialState();
 
             // 進捗監視を再開
             this.startProgressMonitoring();

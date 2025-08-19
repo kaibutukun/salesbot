@@ -185,7 +185,7 @@ document.addEventListener('DOMContentLoaded', function() {
             this.profiles.forEach(profile => {
                 const option = document.createElement('option');
                 option.value = profile.id;
-                option.textContent = profile.title; // profile-manager.jsと同じくtitleフィールドを使用
+                option.textContent = profile.title; // profile-manager.jsと同じtitleフィールドを使用
                 urlProfileSelect.appendChild(option);
             });
 
@@ -367,6 +367,43 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // ====================================
+    // 送信制御機能（最適化版）
+    // ====================================
+    
+    /**
+     * 送信停止処理
+     */
+    async function handleSendingStop() {
+        try {
+            // 停止中状態に変更
+            urlManager.setButtonsToStoppingState();
+            showToast('送信を停止しています...', 'info');
+            
+            // バックグラウンドに停止メッセージを送信
+            const response = await chrome.runtime.sendMessage({ action: ACTION_STOP });
+            
+            if (response && response.success) {
+                showToast('送信を停止しました', 'success');
+            }
+        } catch (error) {
+            console.error('Failed to stop sending:', error);
+            showToast('送信停止中にエラーが発生しました', 'error');
+            
+            // エラー時は実行状態に戻す
+            const executeHandler = batchService ? batchService.getExecuteButtonHandler() : null;
+            if (executeHandler) {
+                const enhancedExecuteHandler = () => {
+                    if (!urlProfileManager.validateSelectedProfile()) {
+                        return;
+                    }
+                    executeHandler();
+                };
+                urlManager.setButtonsToExecuteState(enhancedExecuteHandler);
+            }
+        }
+    }
+
+    // ====================================
     // 初期化処理
     // ====================================
     
@@ -395,7 +432,9 @@ document.addEventListener('DOMContentLoaded', function() {
             
             // 送信実行ボタンにプロフィール選択バリデーション機能を統合
             const executeFromUrlTabButton = getElement('executeFromUrlTab');
-            if (executeFromUrlTabButton) {
+            const stopFromUrlTabButton = getElement('stopFromUrlTab');
+            
+            if (executeFromUrlTabButton && stopFromUrlTabButton) {
                 const originalExecuteHandler = batchService.getExecuteButtonHandler();
                 const enhancedExecuteHandler = () => {
                     if (!urlProfileManager.validateSelectedProfile()) {
@@ -403,7 +442,12 @@ document.addEventListener('DOMContentLoaded', function() {
                     }
                     originalExecuteHandler();
                 };
-                urlManager.setExecuteButtonToExecuteState(enhancedExecuteHandler);
+
+                // 初期状態：送信開始有効、送信停止無効
+                urlManager.setButtonsToExecuteState(enhancedExecuteHandler);
+                
+                // 送信停止ボタンのイベントリスナー設定
+                stopFromUrlTabButton.addEventListener('click', handleSendingStop);
             }
             
             await setInitialTab();
@@ -434,5 +478,28 @@ document.addEventListener('DOMContentLoaded', function() {
             showToast('ダッシュボードを更新しました', 'info');
         });
     }
+
+    // ====================================
+    // 停止完了通知の処理
+    // ====================================
+    
+    // バックグラウンドからの停止完了通知を受信
+    chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+        if (message.action === ACTION_STOP_COMPLETED) {
+            // 停止完了時：送信開始有効、送信停止無効に戻す
+            const executeHandler = batchService ? batchService.getExecuteButtonHandler() : null;
+            if (executeHandler) {
+                const enhancedExecuteHandler = () => {
+                    if (!urlProfileManager.validateSelectedProfile()) {
+                        return;
+                    }
+                    executeHandler();
+                };
+                urlManager.setButtonsToExecuteState(enhancedExecuteHandler);
+            }
+            
+            sendResponse({ received: true });
+        }
+    });
 
 });
