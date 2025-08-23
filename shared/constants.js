@@ -14,6 +14,32 @@ export const BATCH_SIZE = 100;
 export const BATCH_DELAY = 30000; // 30秒
 
 // ====================================
+// 送信状態定数（詳細管理用）
+// ====================================
+
+/** 送信状態の詳細定義 */
+export const SENDING_STATES = {
+    /** 送信前状態（待機中） */
+    IDLE: 'idle',
+    /** 送信中状態 */
+    SENDING: 'sending',
+    /** 停止処理中状態 */
+    STOPPING: 'stopping',
+    /** 完了状態 */
+    COMPLETED: 'completed'
+};
+
+/** 送信状態ストレージキー */
+export const STORAGE_KEYS = {
+    /** 送信状態 */
+    SENDING_STATE: 'sendingState',
+    /** 処理中タブID */
+    PROCESSING_TAB_ID: 'processingTabId',
+    /** 送信進行中フラグ（後方互換性用） */
+    SENDING_IN_PROGRESS: 'sendingInProgress'
+};
+
+// ====================================
 // タイムアウト関連定数
 // ====================================
 
@@ -87,6 +113,36 @@ export const TIMEOUT_MESSAGE_TEMPLATE = (seconds) => `処理タイムアウト�
 /** デバッグモード（開発時のみtrue） */
 export const DEBUG_MODE = false;
 
+// ====================================
+// 状態管理ユーティリティ
+// ====================================
+
+/**
+ * 送信状態が有効な値かどうかをチェック
+ * @param {string} state - チェックする状態
+ * @returns {boolean} 有効な状態の場合true
+ */
+export function isValidSendingState(state) {
+    return Object.values(SENDING_STATES).includes(state);
+}
+
+/**
+ * 送信状態の遷移が有効かどうかをチェック
+ * @param {string} from - 現在の状態
+ * @param {string} to - 遷移先の状態
+ * @returns {boolean} 有効な遷移の場合true
+ */
+export function isValidStateTransition(from, to) {
+    const validTransitions = {
+        [SENDING_STATES.IDLE]: [SENDING_STATES.SENDING],
+        [SENDING_STATES.SENDING]: [SENDING_STATES.STOPPING, SENDING_STATES.COMPLETED],
+        [SENDING_STATES.STOPPING]: [SENDING_STATES.COMPLETED, SENDING_STATES.IDLE],
+        [SENDING_STATES.COMPLETED]: [SENDING_STATES.IDLE, SENDING_STATES.SENDING]
+    };
+    
+    return validTransitions[from]?.includes(to) || false;
+}
+
 /**
  * 定数の妥当性をチェックする
  * @returns {boolean} 全ての定数が妥当な場合true
@@ -103,5 +159,14 @@ export function validateConstants() {
         WAIT_TIMEOUT
     ];
     
-    return requiredPositive.every(value => typeof value === 'number' && value > 0);
+    // 数値定数の検証
+    const numericValid = requiredPositive.every(value => typeof value === 'number' && value > 0);
+    
+    // 送信状態定数の検証
+    const statesValid = Object.values(SENDING_STATES).every(state => typeof state === 'string' && state.length > 0);
+    
+    // ストレージキー定数の検証
+    const keysValid = Object.values(STORAGE_KEYS).every(key => typeof key === 'string' && key.length > 0);
+    
+    return numericValid && statesValid && keysValid;
 }

@@ -7,7 +7,8 @@
 import { ExDB } from '../shared/database.js';
 import {
     ACTION_STOP, ACTION_STOP_COMPLETED, ACTION_EXECUTE,
-    PROGRESS_UPDATE_INTERVAL
+    PROGRESS_UPDATE_INTERVAL, SENDING_STATES, STORAGE_KEYS,
+    isValidSendingState, isValidStateTransition
 } from '../shared/constants.js';
 import { ProgressMonitor } from '../modules/progress-monitor.js';
 
@@ -23,8 +24,8 @@ export class BatchService {
         this.authService = dependencies.authService || null;
         this.refreshDashboardFunction = dependencies.refreshDashboard || null;
 
-        // 内部状態
-        this.isSending = false;
+        // 内部状態（詳細化）
+        this.currentState = SENDING_STATES.IDLE;
 
         // Chrome runtime listener reference
         this.stopStateListener = null;
@@ -69,6 +70,217 @@ export class BatchService {
         }
     }
 
+    // ====================================
+    // タブライフサイクル管理（新機能）
+    // ====================================
+
+    /**
+     * process.htmlタブIDをストレージに記録
+     * @param {number} tabId - 記録するタブID
+     */
+    async storeProcessTabId(tabId) {
+        try {
+            await chrome.storage.local.set({ 
+                'processTabId': tabId,
+                'processTabTimestamp': Date.now()
+            });
+            console.log(`Process tab ID stored: ${tabId}`);
+        } catch (error) {
+            console.error('Failed to store process tab ID:', error);
+        }
+    }
+
+    /**
+     * 記録されたprocess.htmlタブIDを取得
+     * @returns {Promise<number|null>} タブID（なければnull）
+     */
+    async getStoredProcessTabId() {
+        try {
+            const data = await chrome.storage.local.get(['processTabId', 'processTabTimestamp']);
+            
+            // タブIDが記録されていない場合
+            if (!data.processTabId) {
+                return null;
+            }
+
+            // 記録から1時間以上経過している場合は無効とする
+            const oneHour = 60 * 60 * 1000;
+            if (data.processTabTimestamp && (Date.now() - data.processTabTimestamp) > oneHour) {
+                await this.clearProcessTabId();
+                return null;
+            }
+
+            return data.processTabId;
+        } catch (error) {
+            console.error('Failed to get stored process tab ID:', error);
+            return null;
+        }
+    }
+
+    /**
+     * 記録されたprocess.htmlタブIDをクリア
+     */
+    async clearProcessTabId() {
+        try {
+            await chrome.storage.local.remove(['processTabId', 'processTabTimestamp']);
+            console.log('Process tab ID cleared');
+        } catch (error) {
+            console.error('Failed to clear process tab ID:', error);
+        }
+    }
+
+    /**
+     * main.htmlタブの検索と切り替え、またはタブ新規作成
+     * @returns {Promise<number>} main.htmlタブのID
+     */
+    async findOrCreateMainTab() {
+        try {
+            // 既存のmain.htmlタブを検索
+            const mainUrl = chrome.runtime.getURL('ui/main.html');
+            const tabs = await chrome.tabs.query({ url: mainUrl });
+
+            if (tabs.length > 0) {
+                // 既存のmain.htmlタブがある場合は切り替え
+                const mainTab = tabs[0];
+                await chrome.tabs.update(mainTab.id, { active: true });
+                await chrome.windows.update(mainTab.windowId, { focused: true });
+                console.log(`Switched to existing main tab: ${mainTab.id}`);
+                return mainTab.id;
+            } else {
+                // main.htmlタブがない場合は新規作成
+                const newTab = await chrome.tabs.create({ url: 'ui/main.html' });
+                console.log(`Created new main tab: ${newTab.id}`);
+                return newTab.id;
+            }
+        } catch (error) {
+            console.error('Failed to find or create main tab:', error);
+            // フォールバック：新しいタブを作成
+            try {
+                const newTab = await chrome.tabs.create({ url: 'ui/main.html' });
+                return newTab.id;
+            } catch (fallbackError) {
+                console.error('Fallback tab creation failed:', fallbackError);
+                return null;
+            }
+        }
+    }
+
+    // ====================================
+    // 状態管理（詳細化）
+    // ====================================
+
+    /**
+     * 送信状態を変更する
+     * @param {string} newState - 新しい状態
+     * @param {boolean} updateStorage - ストレージも更新するかどうか
+     */
+    async setSendingState(newState, updateStorage = true) {
+        if (!isValidSendingState(newState)) {
+            console.error(`Invalid sending state: ${newState}`);
+            return false;
+        }
+
+        if (!isValidStateTransition(this.currentState, newState)) {
+            console.warn(`Invalid state transition: ${this.currentState} -> ${newState}`);
+        }
+
+        const previousState = this.currentState;
+        this.currentState = newState;
+
+        if (updateStorage) {
+            try {
+                await chrome.storage.local.set({ 
+                    [STORAGE_KEYS.SENDING_STATE]: newState,
+                    // 後方互換性のためのフラグも更新
+                    [STORAGE_KEYS.SENDING_IN_PROGRESS]: newState === SENDING_STATES.SENDING
+                });
+            } catch (error) {
+                console.error('Failed to update sending state in storage:', error);
+                // ストレージ更新に失敗した場合は状態を戻す
+                this.currentState = previousState;
+                return false;
+            }
+        }
+
+        // 状態変更に応じてUIを更新
+        this.updateUIBasedOnState(newState);
+        return true;
+    }
+
+    /**
+     * 現在の送信状態を取得する
+     * @returns {string} 現在の状態
+     */
+    getCurrentState() {
+        return this.currentState;
+    }
+
+    /**
+     * ストレージから送信状態を読み込む
+     * @returns {Promise<string>} 読み込まれた状態
+     */
+    async loadSendingStateFromStorage() {
+        try {
+            const data = await chrome.storage.local.get([
+                STORAGE_KEYS.SENDING_STATE,
+                STORAGE_KEYS.SENDING_IN_PROGRESS
+            ]);
+
+            // 新しい詳細状態があればそれを使用
+            if (data[STORAGE_KEYS.SENDING_STATE] && isValidSendingState(data[STORAGE_KEYS.SENDING_STATE])) {
+                return data[STORAGE_KEYS.SENDING_STATE];
+            }
+
+            // 後方互換性：古いフラグから状態を推測
+            if (data[STORAGE_KEYS.SENDING_IN_PROGRESS]) {
+                return SENDING_STATES.SENDING;
+            }
+
+            return SENDING_STATES.IDLE;
+        } catch (error) {
+            console.error('Failed to load sending state from storage:', error);
+            return SENDING_STATES.IDLE;
+        }
+    }
+
+    /**
+     * 状態に基づいてUIを更新する
+     * @param {string} state - 現在の状態
+     */
+    updateUIBasedOnState(state) {
+        if (!this.urlManager) return;
+
+        switch (state) {
+            case SENDING_STATES.IDLE:
+                this.urlManager.setButtonsToExecuteState(() => this.executeButtonHandler());
+                if (this.dashboard) {
+                    this.dashboard.updateSendingStatus('待機中', false);
+                }
+                break;
+
+            case SENDING_STATES.SENDING:
+                this.urlManager.setButtonsToSendingState(() => this.stopButtonHandler());
+                if (this.dashboard) {
+                    this.dashboard.updateSendingStatus('送信中...', true);
+                }
+                break;
+
+            case SENDING_STATES.STOPPING:
+                this.urlManager.setButtonsToStoppingState();
+                if (this.dashboard) {
+                    this.dashboard.updateSendingStatus('停止処理中...', false);
+                }
+                break;
+
+            case SENDING_STATES.COMPLETED:
+                this.urlManager.setButtonsToExecuteState(() => this.executeButtonHandler());
+                if (this.dashboard) {
+                    this.dashboard.updateSendingStatus('完了', false);
+                }
+                break;
+        }
+    }
+
     /**
      * 停止状態リスナーを設定する（修正版）
      */
@@ -107,29 +319,32 @@ export class BatchService {
     /**
      * 停止完了時の処理
      */
-    handleStopCompleted() {
-        // 送信状態をリセット
-        this.isSending = false;
+    async handleStopCompleted() {
+        // 状態を完了に変更
+        await this.setSendingState(SENDING_STATES.COMPLETED);
 
-        // ボタンを実行状態に戻す
-        if (this.urlManager) {
-            this.urlManager.setButtonsToExecuteState(() => this.executeButtonHandler());
-        }
-
-        // 送信状態を更新
+        // ダッシュボードをリセット
         if (this.dashboard) {
-            this.dashboard.updateSendingStatus('停止完了', false);
             this.dashboard.resetProgress();
         }
 
-        chrome.storage.local.remove('sendingInProgress');
+        // 少し待ってから待機状態に戻す
+        setTimeout(async () => {
+            await this.setSendingState(SENDING_STATES.IDLE);
+        }, 1000);
     }
 
     /**
-     * 実行ボタンのイベントハンドラー
+     * 実行ボタンのイベントハンドラー（処理順序修正版）
      */
     async executeButtonHandler() {
         try {
+            // 現在の状態をチェック
+            if (this.currentState !== SENDING_STATES.IDLE && this.currentState !== SENDING_STATES.COMPLETED) {
+                this.showToast('送信処理が既に実行中です', 'warning');
+                return;
+            }
+
             // ライセンス確認
             if (this.authService) {
                 const isLicenseValid = await this.authService.isLicenseValid();
@@ -155,30 +370,38 @@ export class BatchService {
                 return;
             }
 
-            // URLリストの確認と保存
+            // ====================================
+            // 修正された処理順序：自動保存 → バリデーション
+            // ====================================
+
             let urlsToProcess = [];
             
             if (this.urlManager) {
+                // Step 1: テキストエリアから現在のURLリストを取得
+                urlsToProcess = this.urlManager.getCurrentUrls();
+                
+                // Step 2: URLがテキストエリアに入力されていれば自動保存
+                if (urlsToProcess.length > 0) {
+                    console.log(`Auto-saving ${urlsToProcess.length} URLs before validation`);
+                    await this.urlManager.saveUrlList();
+                    // 保存完了を確実に待機
+                    await new Promise(resolve => setTimeout(resolve, 800));
+                }
+                
+                // Step 3: 保存後にバリデーション実行
                 const urlValidation = await this.urlManager.validateUrlList();
                 if (!urlValidation.isValid) {
                     this.showToast(urlValidation.message, 'warning');
                     return;
                 }
                 
-                // 現在のURLリストを取得
-                urlsToProcess = this.urlManager.getCurrentUrls();
-                
-                // URLリストが入力されているが保存されていない場合は自動保存
-                if (urlsToProcess.length > 0) {
-                    await this.urlManager.saveUrlList();
-                    await new Promise(resolve => setTimeout(resolve, 500));
-                }
+                console.log('URL validation passed:', urlValidation.message);
             }
 
             // 最新のTodoを取得
             let latestTodo = await db.getLatestTodo();
 
-            // タスクが存在しない場合は手動で作成
+            // タスクが存在しない場合は手動で作成（フォールバック）
             if (!latestTodo) {
                 if (urlsToProcess.length === 0) {
                     this.showToast('URLリストが設定されていません', 'warning');
@@ -232,24 +455,16 @@ export class BatchService {
                 await new Promise(resolve => setTimeout(resolve, 1000));
             }
 
-            // 送信進行状態を設定
-            await chrome.storage.local.set({ sendingInProgress: true });
-            this.isSending = true;
-
-            // ボタンを送信中状態に変更
-            if (this.urlManager) {
-                this.urlManager.setButtonsToSendingState(() => this.stopButtonHandler());
-            }
-
-            // 送信状態を更新
-            if (this.dashboard) {
-                this.dashboard.updateSendingStatus('送信中...', true);
-            }
+            // 状態を送信中に変更
+            await this.setSendingState(SENDING_STATES.SENDING);
 
             await this.refreshDashboard();
 
             // 処理用タブを作成
             const tab = await chrome.tabs.create({ url: 'ui/process.html' });
+            
+            // タブIDをストレージに記録（タブライフサイクル管理）
+            await this.storeProcessTabId(tab.id);
             
             // 確実にタブが作成されるまで待機
             await new Promise(resolve => setTimeout(resolve, 1500));
@@ -266,7 +481,7 @@ export class BatchService {
             this.showToast('送信開始に失敗しました: ' + error.message, 'error');
             
             // エラー時は状態をリセット
-            this.resetToInitialState();
+            await this.setSendingState(SENDING_STATES.IDLE);
         }
     }
 
@@ -275,9 +490,17 @@ export class BatchService {
      */
     async stopButtonHandler() {
         try {
+            if (this.currentState !== SENDING_STATES.SENDING) {
+                this.showToast('停止できる処理がありません', 'warning');
+                return;
+            }
+
             if (!confirm('送信処理を停止しますか？')) {
                 return;
             }
+
+            // 状態を停止処理中に変更
+            await this.setSendingState(SENDING_STATES.STOPPING);
 
             chrome.runtime.sendMessage({ action: ACTION_STOP }, (response) => {
                 if (chrome.runtime.lastError) {
@@ -287,72 +510,85 @@ export class BatchService {
 
             this.showToast('送信処理を停止しています...', 'info');
 
-            // 送信状態を更新
-            if (this.dashboard) {
-                this.dashboard.updateSendingStatus('停止処理中...', false);
-            }
-
-            // ボタンを停止中状態に変更
-            if (this.urlManager) {
-                this.urlManager.setButtonsToStoppingState();
-            }
-
-            chrome.storage.local.remove('sendingInProgress');
         } catch (error) {
             this.showToast('送信停止に失敗しました', 'error');
+            // エラー時は送信中状態に戻す
+            await this.setSendingState(SENDING_STATES.SENDING);
         }
     }
 
     /**
-     * 送信状態を確認して復元する
+     * 送信状態を確認して復元する（詳細版）
      */
     async checkAndRestoreSendingState() {
         try {
-            const sendingData = await chrome.storage.local.get('sendingInProgress');
+            // ストレージから状態を読み込み
+            const storedState = await this.loadSendingStateFromStorage();
             
-            if (sendingData.sendingInProgress) {
-                const db = new ExDB();
-                const latestTodo = await db.getLatestTodo();
-                
-                if (latestTodo && !latestTodo.completed && latestTodo.description) {
-                    const hasProcessed = latestTodo.description.some(item => item.result !== '');
-                    const allProcessed = latestTodo.description.every(item => item.result !== '');
-                    
-                    if (!allProcessed) {
-                        // 送信中状態を復元
-                        this.isSending = true;
-                        if (this.urlManager) {
-                            this.urlManager.setButtonsToSendingState(() => this.stopButtonHandler());
-                        }
-
-                        // 送信状態を更新
-                        if (this.dashboard) {
-                            this.dashboard.updateSendingStatus('送信中...', true);
-                        }
-                    } else {
-                        chrome.storage.local.remove('sendingInProgress');
-                    }
-                } else {
-                    chrome.storage.local.remove('sendingInProgress');
-                }
+            if (storedState === SENDING_STATES.IDLE) {
+                // 待機状態の場合はそのまま設定
+                await this.setSendingState(SENDING_STATES.IDLE, false);
+                return;
             }
-        } catch (error) {
-            chrome.storage.local.remove('sendingInProgress');
-        }
-    }
 
-    /**
-     * 初期状態にリセット
-     */
-    resetToInitialState() {
-        this.isSending = false;
-        chrome.storage.local.remove('sendingInProgress');
-        
-        if (this.urlManager) {
-            this.urlManager.setButtonsToExecuteState(() => this.executeButtonHandler());
-        }
-        if (this.dashboard) {
-            this.dashboard.updateSendingStatus('待機中', false);
+            // データベースの状態もチェック
+            const db = new ExDB();
+            const latestTodo = await db.getLatestTodo();
+            
+            if (!latestTodo || !latestTodo.description) {
+                // タスクがない場合は待機状態に設定
+                await this.setSendingState(SENDING_STATES.IDLE);
+                return;
+            }
+
+            if (latestTodo.completed) {
+                // タスクが完了済みの場合は待機状態に設定
+                await this.setSendingState(SENDING_STATES.IDLE);
+                return;
+            }
+
+            // 処理済みアイテムの状況を確認
+            const hasProcessed = latestTodo.description.some(item => item.result !== '');
+            const allProcessed = latestTodo.description.every(item => item.result !== '');
+
+            if (allProcessed) {
+                // 全て処理済みの場合は完了状態に設定
+                await this.setSendingState(SENDING_STATES.COMPLETED);
+                return;
+            }
+
+            // ストレージの状態に応じて復元
+            switch (storedState) {
+                case SENDING_STATES.SENDING:
+                    // 送信中状態を復元
+                    await this.setSendingState(SENDING_STATES.SENDING, false);
+                    break;
+
+                case SENDING_STATES.STOPPING:
+                    // 停止処理中状態を復元
+                    await this.setSendingState(SENDING_STATES.STOPPING, false);
+                    break;
+
+                case SENDING_STATES.COMPLETED:
+                    if (hasProcessed) {
+                        // 一部処理済みで完了状態の場合は、実際は停止された可能性
+                        await this.setSendingState(SENDING_STATES.COMPLETED, false);
+                    } else {
+                        // 未処理の場合は待機状態に戻す
+                        await this.setSendingState(SENDING_STATES.IDLE);
+                    }
+                    break;
+
+                default:
+                    // 不明な状態の場合は待機状態に設定
+                    await this.setSendingState(SENDING_STATES.IDLE);
+                    break;
+            }
+
+        } catch (error) {
+            console.error('Failed to restore sending state:', error);
+            // エラー時は安全に待機状態に設定
+            await this.setSendingState(SENDING_STATES.IDLE);
         }
     }
 
@@ -366,21 +602,16 @@ export class BatchService {
      */
     async handleProgressCompleted(progressInfo) {
         try {
-            // 送信状態をリセット
-            this.isSending = false;
-
-            // ダッシュボードの状態更新
-            if (this.dashboard) {
-                this.dashboard.updateSendingStatus('待機中', false);
-            }
-
-            // 実行ボタンを元に戻す
-            if (this.urlManager) {
-                this.urlManager.setButtonsToExecuteState(() => this.executeButtonHandler());
-            }
+            // 状態を完了に変更
+            await this.setSendingState(SENDING_STATES.COMPLETED);
 
             // ダッシュボードを更新
             await this.refreshDashboard();
+
+            // 少し待ってから待機状態に戻す
+            setTimeout(async () => {
+                await this.setSendingState(SENDING_STATES.IDLE);
+            }, 2000);
         } catch (error) {
             console.error('Failed to handle progress completion:', error);
         }
@@ -438,7 +669,7 @@ export class BatchService {
      */
     getExecutionState() {
         return {
-            isSending: this.isSending,
+            currentState: this.currentState,
             isProgressMonitoring: this.progressMonitor ? this.progressMonitor.getMonitoringState().isMonitoring : false
         };
     }
@@ -448,12 +679,7 @@ export class BatchService {
      * @returns {Promise<boolean>} 実行中の場合はtrue
      */
     async isExecuting() {
-        try {
-            const sendingData = await chrome.storage.local.get('sendingInProgress');
-            return sendingData.sendingInProgress || false;
-        } catch (error) {
-            return false;
-        }
+        return this.currentState === SENDING_STATES.SENDING;
     }
 
     /**
@@ -507,8 +733,8 @@ export class BatchService {
             // 進捗監視を停止
             this.stopProgressMonitoring();
 
-            // 状態をリセット
-            this.resetToInitialState();
+            // 状態を待機中に設定
+            await this.setSendingState(SENDING_STATES.IDLE);
 
             // 進捗監視を再開
             this.startProgressMonitoring();

@@ -202,6 +202,106 @@ function checkStopped() {
     }
 }
 
+// ====================================
+// タブライフサイクル管理機能
+// ====================================
+
+/**
+ * 記録されたprocess.htmlタブIDを取得
+ * @returns {Promise<number|null>} タブID（なければnull）
+ */
+async function getStoredProcessTabId() {
+    try {
+        const data = await chrome.storage.local.get(['processTabId', 'processTabTimestamp']);
+        
+        // タブIDが記録されていない場合
+        if (!data.processTabId) {
+            return null;
+        }
+
+        // 記録から1時間以上経過している場合は無効とする
+        const oneHour = 60 * 60 * 1000;
+        if (data.processTabTimestamp && (Date.now() - data.processTabTimestamp) > oneHour) {
+            await clearProcessTabId();
+            return null;
+        }
+
+        return data.processTabId;
+    } catch (error) {
+        console.error('Failed to get stored process tab ID:', error);
+        return null;
+    }
+}
+
+/**
+ * 記録されたprocess.htmlタブIDをクリア
+ */
+async function clearProcessTabId() {
+    try {
+        await chrome.storage.local.remove(['processTabId', 'processTabTimestamp']);
+        console.log('Process tab ID cleared from background');
+    } catch (error) {
+        console.error('Failed to clear process tab ID:', error);
+    }
+}
+
+/**
+ * process.htmlタブを安全に閉じる
+ * @param {number} tabId - 閉じるタブID
+ * @returns {Promise<boolean>} 成功時はtrue
+ */
+async function closeProcessTab(tabId) {
+    try {
+        // タブが存在するかチェック
+        const tab = await chrome.tabs.get(tabId);
+        if (tab && tab.url && tab.url.includes('ui/process.html')) {
+            await chrome.tabs.remove(tabId);
+            console.log(`Process tab closed: ${tabId}`);
+            return true;
+        }
+    } catch (error) {
+        // タブが既に閉じられている場合など、エラーは正常
+        console.log(`Process tab ${tabId} was already closed or not found`);
+    }
+    return false;
+}
+
+/**
+ * main.htmlタブの検索と切り替え、またはタブ新規作成
+ * @returns {Promise<number|null>} main.htmlタブのID
+ */
+async function findOrCreateMainTab() {
+    try {
+        // 既存のmain.htmlタブを検索
+        const mainUrl = chrome.runtime.getURL('ui/main.html');
+        const tabs = await chrome.tabs.query({ url: mainUrl });
+
+        if (tabs.length > 0) {
+            // 既存のmain.htmlタブがある場合は切り替え
+            const mainTab = tabs[0];
+            await chrome.tabs.update(mainTab.id, { active: true });
+            await chrome.windows.update(mainTab.windowId, { focused: true });
+            console.log(`Switched to existing main tab: ${mainTab.id}`);
+            return mainTab.id;
+        } else {
+            // main.htmlタブがない場合は新規作成
+            const newTab = await chrome.tabs.create({ url: 'ui/main.html' });
+            console.log(`Created new main tab: ${newTab.id}`);
+            return newTab.id;
+        }
+    } catch (error) {
+        console.error('Failed to find or create main tab:', error);
+        // フォールバック：新しいタブを作成
+        try {
+            const newTab = await chrome.tabs.create({ url: 'ui/main.html' });
+            return newTab.id;
+        } catch (fallbackError) {
+            console.error('Fallback tab creation failed:', fallbackError);
+            return null;
+        }
+    }
+}
+
 // Chrome拡張機能イベントリスナー
 chrome.action.onClicked.addListener(async (tab) => {
     try {
@@ -601,19 +701,135 @@ async function batchBreak(batchNumber, totalBatches, tabId) {
     });
 }
 
-// 停止完了通知
+// ====================================
+// 全タブ対応通知システム（解決策E）
+// ====================================
+
+/**
+ * 停止完了通知を全関連タブに送信
+ * main.htmlとprocess.htmlの両方のタブに通知を配信
+ */
+async function notifyAllTabsStopCompleted() {
+    try {
+        console.log('notifyAllTabsStopCompleted: Starting comprehensive tab notification');
+        
+        // 対象となるURLパターンを定義
+        const targetUrls = [
+            chrome.runtime.getURL('ui/main.html'),
+            chrome.runtime.getURL('ui/process.html')
+        ];
+
+        // すべての関連タブを検索
+        const allTabs = await chrome.tabs.query({ url: targetUrls });
+        console.log(`notifyAllTabsStopCompleted: Found ${allTabs.length} related tabs`);
+
+        // 各タブに停止完了通知を送信
+        const notificationPromises = allTabs.map(async (tab) => {
+            try {
+                await chrome.tabs.sendMessage(tab.id, { 
+                    action: ACTION_STOP_COMPLETED,
+                    timestamp: Date.now()
+                });
+                console.log(`notifyAllTabsStopCompleted: Successfully notified tab ${tab.id} (${tab.url})`);
+                return { tabId: tab.id, success: true };
+            } catch (error) {
+                // タブが既に閉じられている場合や応答がない場合はエラーを記録
+                console.log(`notifyAllTabsStopCompleted: Failed to notify tab ${tab.id}: ${error.message}`);
+                return { tabId: tab.id, success: false, error: error.message };
+            }
+        });
+
+        // すべての通知完了を待つ
+        const results = await Promise.all(notificationPromises);
+        
+        // 結果をログ出力
+        const successful = results.filter(r => r.success).length;
+        const failed = results.filter(r => !r.success).length;
+        console.log(`notifyAllTabsStopCompleted: Notification results - Success: ${successful}, Failed: ${failed}`);
+
+        return {
+            total: allTabs.length,
+            successful,
+            failed,
+            results
+        };
+
+    } catch (error) {
+        console.error('notifyAllTabsStopCompleted: Error during tab notification:', error);
+        return {
+            total: 0,
+            successful: 0,
+            failed: 0,
+            error: error.message
+        };
+    }
+}
+
+/**
+ * 停止完了通知（タブライフサイクル管理 + 全タブ通知システム統合版）
+ */
 async function notifyStopCompleted() {
     try {
-        const tabs = await chrome.tabs.query({ url: chrome.runtime.getURL('ui/main.html') });
-        for (const tab of tabs) {
-            try {
-                await chrome.tabs.sendMessage(tab.id, { action: ACTION_STOP_COMPLETED });
-            } catch (error) {
-                // エラーを無視
-            }
+        console.log('notifyStopCompleted: Starting integrated tab management and notification');
+        
+        // ====================================
+        // Phase 1: 全タブへの停止完了通知（解決策E）
+        // ====================================
+        
+        const notificationResult = await notifyAllTabsStopCompleted();
+        console.log('notifyStopCompleted: Tab notification phase completed:', notificationResult);
+
+        // ====================================
+        // Phase 2: タブライフサイクル管理（解決策C）
+        // ====================================
+        
+        // 記録されたprocess.htmlタブを取得して閉じる
+        const processTabId = await getStoredProcessTabId();
+        if (processTabId) {
+            // 少し待ってからタブを閉じる（通知が届く時間を確保）
+            setTimeout(async () => {
+                const closed = await closeProcessTab(processTabId);
+                if (closed) {
+                    console.log(`notifyStopCompleted: Process tab ${processTabId} closed after notification`);
+                }
+                
+                // タブIDをクリア
+                await clearProcessTabId();
+            }, 500);
+        } else {
+            console.log('notifyStopCompleted: No specific process tab ID found, relying on general notification');
         }
+
+        // main.htmlタブを検索して切り替え、なければ新規作成
+        const mainTabId = await findOrCreateMainTab();
+        if (mainTabId) {
+            console.log(`notifyStopCompleted: Main tab managed successfully: ${mainTabId}`);
+        }
+
+        console.log('notifyStopCompleted: Integrated tab management completed successfully');
+        
+        return {
+            notificationResult,
+            processTabClosed: !!processTabId,
+            mainTabId
+        };
+
     } catch (error) {
-        // エラーを無視
+        console.error('notifyStopCompleted: Error during integrated tab management:', error);
+        
+        // エラーが発生してもフォールバック処理を実行
+        try {
+            // 最低限、main.htmlタブを作成
+            await chrome.tabs.create({ url: 'ui/main.html' });
+            console.log('notifyStopCompleted: Fallback main tab created');
+        } catch (fallbackError) {
+            console.error('notifyStopCompleted: Fallback tab creation failed:', fallbackError);
+        }
+        
+        return {
+            error: error.message,
+            fallbackExecuted: true
+        };
     }
 }
 

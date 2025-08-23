@@ -5,7 +5,10 @@ import {
     ACTION_STOP_COMPLETED,
     ACTION_EXECUTE,
     PROGRESS_UPDATE_INTERVAL,
-    SHORT_DELAY
+    SHORT_DELAY,
+    SENDING_STATES,
+    STORAGE_KEYS,
+    isValidSendingState
 } from '../shared/constants.js';
 import { ExDB } from '../shared/database.js';
 import { SALES_LIST_DATA } from '../shared/sales-data.js';
@@ -367,7 +370,7 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // ====================================
-    // 送信制御機能（最適化版）
+    // 送信制御機能（詳細状態対応版）
     // ====================================
     
     /**
@@ -375,40 +378,185 @@ document.addEventListener('DOMContentLoaded', function() {
      */
     async function handleSendingStop() {
         try {
-            // 停止中状態に変更
-            urlManager.setButtonsToStoppingState();
-            showToast('送信を停止しています...', 'info');
-            
-            // バックグラウンドに停止メッセージを送信
-            const response = await chrome.runtime.sendMessage({ action: ACTION_STOP });
-            
-            if (response && response.success) {
-                showToast('送信を停止しました', 'success');
+            // BatchServiceの停止ハンドラーを使用
+            if (batchService) {
+                const stopHandler = batchService.getStopButtonHandler();
+                if (stopHandler) {
+                    await stopHandler();
+                }
+            } else {
+                // フォールバック処理
+                const response = await chrome.runtime.sendMessage({ action: ACTION_STOP });
+                
+                if (response && response.success) {
+                    showToast('送信を停止しました', 'success');
+                } else {
+                    showToast('送信停止中にエラーが発生しました', 'error');
+                }
             }
         } catch (error) {
             console.error('Failed to stop sending:', error);
             showToast('送信停止中にエラーが発生しました', 'error');
-            
-            // エラー時は実行状態に戻す
-            const executeHandler = batchService ? batchService.getExecuteButtonHandler() : null;
-            if (executeHandler) {
-                const enhancedExecuteHandler = () => {
-                    if (!urlProfileManager.validateSelectedProfile()) {
-                        return;
-                    }
-                    executeHandler();
-                };
-                urlManager.setButtonsToExecuteState(enhancedExecuteHandler);
-            }
         }
     }
 
     // ====================================
-    // 初期化処理
+    // リアルタイム状態同期システム（解決策B）
+    // ====================================
+
+    /**
+     * 状態変更時の包括的UI同期処理
+     * @param {string} newState - 新しい送信状態
+     * @param {string|undefined} oldState - 以前の送信状態
+     */
+    async function syncAllComponentsToState(newState, oldState = undefined) {
+        try {
+            console.log(`main.js: Syncing all components from ${oldState} to ${newState}`);
+
+            // ダッシュボードの状態同期
+            if (dashboard) {
+                switch (newState) {
+                    case SENDING_STATES.IDLE:
+                        dashboard.updateSendingStatus('待機中', false);
+                        break;
+                    case SENDING_STATES.SENDING:
+                        dashboard.updateSendingStatus('送信中...', true);
+                        break;
+                    case SENDING_STATES.STOPPING:
+                        dashboard.updateSendingStatus('停止処理中...', false);
+                        break;
+                    case SENDING_STATES.COMPLETED:
+                        dashboard.updateSendingStatus('完了', false);
+                        // 完了時はダッシュボードをリフレッシュ
+                        setTimeout(() => {
+                            dashboard.refreshDashboard();
+                        }, 1000);
+                        break;
+                }
+            }
+
+            // プロファイルマネージャーの状態同期（必要に応じて）
+            if (profileManager && typeof profileManager.onSendingStateChanged === 'function') {
+                profileManager.onSendingStateChanged(newState);
+            }
+
+            // 結果マネージャーの状態同期（必要に応じて）
+            if (resultsManager && typeof resultsManager.onSendingStateChanged === 'function') {
+                resultsManager.onSendingStateChanged(newState);
+            }
+
+            // AuthServiceの状態同期（ライセンス状態の再確認など）
+            if (authService && newState === SENDING_STATES.IDLE) {
+                // 待機状態に戻った時にライセンス状態を再確認
+                setTimeout(() => {
+                    authService.checkLicenseStatus();
+                }, 500);
+            }
+
+            // トーストメッセージによる状態変更通知（適切な場合のみ）
+            if (oldState && oldState !== newState) {
+                switch (newState) {
+                    case SENDING_STATES.SENDING:
+                        if (oldState === SENDING_STATES.IDLE) {
+                            showToast('送信処理を開始しました', 'info');
+                        }
+                        break;
+                    case SENDING_STATES.STOPPING:
+                        if (oldState === SENDING_STATES.SENDING) {
+                            showToast('送信停止処理中です', 'info');
+                        }
+                        break;
+                    case SENDING_STATES.COMPLETED:
+                        if (oldState === SENDING_STATES.SENDING || oldState === SENDING_STATES.STOPPING) {
+                            showToast('送信処理が完了しました', 'success');
+                        }
+                        break;
+                    case SENDING_STATES.IDLE:
+                        if (oldState === SENDING_STATES.COMPLETED || oldState === SENDING_STATES.STOPPING) {
+                            showToast('待機状態に戻りました', 'info');
+                        }
+                        break;
+                }
+            }
+
+            console.log(`main.js: Component sync completed for state ${newState}`);
+
+        } catch (error) {
+            console.error('main.js: Error during component state sync:', error);
+        }
+    }
+
+    /**
+     * リアルタイム状態同期リスナーを設定
+     */
+    function setupRealtimeStateSync() {
+        // Chrome storage change listener
+        chrome.storage.onChanged.addListener((changes, areaName) => {
+            // 送信状態の変更を監視
+            if (areaName === 'local' && changes[STORAGE_KEYS.SENDING_STATE]) {
+                const oldState = changes[STORAGE_KEYS.SENDING_STATE].oldValue;
+                const newState = changes[STORAGE_KEYS.SENDING_STATE].newValue;
+                
+                console.log(`main.js: Storage state change detected: ${oldState} -> ${newState}`);
+                
+                // 新しい状態が有効な場合のみ同期
+                if (isValidSendingState(newState)) {
+                    syncAllComponentsToState(newState, oldState);
+                } else {
+                    console.warn(`main.js: Invalid state received: ${newState}`);
+                }
+            }
+
+            // 後方互換性のための古いフラグも監視
+            if (areaName === 'local' && changes[STORAGE_KEYS.SENDING_IN_PROGRESS]) {
+                // 詳細状態が設定されていない場合のフォールバック
+                if (!changes[STORAGE_KEYS.SENDING_STATE]) {
+                    const isInProgress = changes[STORAGE_KEYS.SENDING_IN_PROGRESS].newValue;
+                    const legacyState = isInProgress ? SENDING_STATES.SENDING : SENDING_STATES.IDLE;
+                    
+                    console.log(`main.js: Legacy state sync to ${legacyState}`);
+                    syncAllComponentsToState(legacyState);
+                }
+            }
+
+            // その他の設定変更の監視（プロフィール、設定など）
+            if (areaName === 'local' && changes.optionPatterns) {
+                console.log('main.js: Profiles updated, refreshing UI components');
+                // プロフィール変更時の処理
+                setTimeout(() => {
+                    if (urlProfileManager) {
+                        urlProfileManager.loadProfiles();
+                    }
+                }, 100);
+            }
+
+            if (areaName === 'sync' && changes.validLicense) {
+                console.log('main.js: License status changed');
+                // ライセンス状態変更時の処理
+                if (authService) {
+                    authService.updateLicenseStatus(changes.validLicense.newValue);
+                }
+            }
+        });
+
+        console.log('main.js: Realtime state sync system initialized');
+    }
+
+    // ====================================
+    // 初期化処理（修正版）
     // ====================================
     
     async function init() {
         try {
+            // Step 1: 基本サービスとマネージャーの初期化
+            await authService.initializeAuth();
+            await urlManager.loadUrlList();
+            await profileManager.loadProfiles();
+            await resultsManager.loadResults();
+            await settingsManager.loadAllSettings();
+            await refreshDashboard();
+            
+            // Step 2: BatchServiceの初期化（URLManagerが初期化済み状態で実行）
             batchService = new BatchService({
                 showToast: showToast,
                 urlManager: urlManager,
@@ -421,36 +569,47 @@ document.addEventListener('DOMContentLoaded', function() {
                 batchService.progressMonitor.setStorageService(storageService);
             }
 
-            await authService.initializeAuth();
-            await urlManager.loadUrlList();
-            await profileManager.loadProfiles();
-            await resultsManager.loadResults();
-            await settingsManager.loadAllSettings();
-            await refreshDashboard();
-            
+            // Step 3: 送信状態の復元（詳細状態対応）
             await batchService.checkAndRestoreSendingState();
             
-            // 送信実行ボタンにプロフィール選択バリデーション機能を統合
+            // Step 4: 送信実行ボタンの設定（修正版）
             const executeFromUrlTabButton = getElement('executeFromUrlTab');
             const stopFromUrlTabButton = getElement('stopFromUrlTab');
             
             if (executeFromUrlTabButton && stopFromUrlTabButton) {
-                const originalExecuteHandler = batchService.getExecuteButtonHandler();
+                // プロフィール選択バリデーション付きの実行ハンドラーを作成
                 const enhancedExecuteHandler = () => {
+                    // プロフィール選択のバリデーション
                     if (!urlProfileManager.validateSelectedProfile()) {
                         return;
                     }
-                    originalExecuteHandler();
+                    
+                    // BatchServiceの実行ハンドラーを呼び出し
+                    const batchExecuteHandler = batchService.getExecuteButtonHandler();
+                    if (batchExecuteHandler) {
+                        batchExecuteHandler();
+                    } else {
+                        showToast('送信処理の初期化に失敗しました', 'error');
+                    }
                 };
 
-                // 初期状態：送信開始有効、送信停止無効
-                urlManager.setButtonsToExecuteState(enhancedExecuteHandler);
-                
-                // 送信停止ボタンのイベントリスナー設定
-                stopFromUrlTabButton.addEventListener('click', handleSendingStop);
+                // URLManagerの状態復元機能を使用（詳細状態対応）
+                const restoredState = await urlManager.restoreButtonStateFromStorage(
+                    enhancedExecuteHandler,
+                    handleSendingStop
+                );
+
+                console.log(`main.js: Button states restored to ${restoredState}`);
             }
+
+            // Step 5: リアルタイム状態同期システムを設定（解決策B）
+            setupRealtimeStateSync();
             
+            // Step 6: 初期タブ設定
             await setInitialTab();
+            
+            console.log('main.js: Initialization completed successfully');
+            
         } catch (error) {
             showToast('初期化中にエラーが発生しました', 'error');
             console.error('Initialization error:', error);
@@ -480,25 +639,27 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // ====================================
-    // 停止完了通知の処理
+    // 停止完了通知の処理（詳細状態対応）
     // ====================================
     
     // バックグラウンドからの停止完了通知を受信
     chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
         if (message.action === ACTION_STOP_COMPLETED) {
-            // 停止完了時：送信開始有効、送信停止無効に戻す
-            const executeHandler = batchService ? batchService.getExecuteButtonHandler() : null;
-            if (executeHandler) {
-                const enhancedExecuteHandler = () => {
-                    if (!urlProfileManager.validateSelectedProfile()) {
-                        return;
-                    }
-                    executeHandler();
-                };
-                urlManager.setButtonsToExecuteState(enhancedExecuteHandler);
-            }
+            console.log('main.js: Stop completion notification received', {
+                timestamp: message.timestamp,
+                sender: sender
+            });
             
-            sendResponse({ received: true });
+            // BatchServiceが自動的に状態を更新するため、追加の処理は最小限に
+            // ダッシュボードのリフレッシュは状態同期システムで自動実行される
+            
+            sendResponse({ 
+                received: true, 
+                timestamp: Date.now(),
+                source: 'main.js'
+            });
+            
+            return true; // 非同期応答を示す
         }
     });
 
