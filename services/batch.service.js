@@ -75,6 +75,122 @@ export class BatchService {
     // ====================================
 
     /**
+     * 元のタブID（送信開始前のタブ）をストレージに記録
+     * @param {number} tabId - 記録するタブID
+     */
+    async storeOriginalTabId(tabId) {
+        try {
+            await chrome.storage.local.set({ 
+                'originalTabId': tabId,
+                'originalTabTimestamp': Date.now()
+            });
+            console.log(`Original tab ID stored: ${tabId}`);
+        } catch (error) {
+            console.error('Failed to store original tab ID:', error);
+        }
+    }
+
+    /**
+     * 記録された元のタブIDを取得
+     * @returns {Promise<number|null>} タブID（なければnull）
+     */
+    async getStoredOriginalTabId() {
+        try {
+            const data = await chrome.storage.local.get(['originalTabId', 'originalTabTimestamp']);
+            
+            // タブIDが記録されていない場合
+            if (!data.originalTabId) {
+                return null;
+            }
+
+            // 記録から2時間以上経過している場合は無効とする
+            const twoHours = 2 * 60 * 60 * 1000;
+            if (data.originalTabTimestamp && (Date.now() - data.originalTabTimestamp) > twoHours) {
+                await this.clearOriginalTabId();
+                return null;
+            }
+
+            return data.originalTabId;
+        } catch (error) {
+            console.error('Failed to get stored original tab ID:', error);
+            return null;
+        }
+    }
+
+    /**
+     * 記録された元のタブIDをクリア
+     */
+    async clearOriginalTabId() {
+        try {
+            await chrome.storage.local.remove(['originalTabId', 'originalTabTimestamp']);
+            console.log('Original tab ID cleared');
+        } catch (error) {
+            console.error('Failed to clear original tab ID:', error);
+        }
+    }
+
+    /**
+     * 現在のタブIDを取得して記録する
+     * @returns {Promise<number|null>} 取得・記録されたタブID
+     */
+    async getCurrentAndStoreTabId() {
+        try {
+            // chrome.tabs.getCurrent() で現在のタブIDを取得
+            const currentTab = await new Promise((resolve, reject) => {
+                chrome.tabs.getCurrent((tab) => {
+                    if (chrome.runtime.lastError) {
+                        reject(new Error(chrome.runtime.lastError.message));
+                    } else if (tab) {
+                        resolve(tab);
+                    } else {
+                        // getCurrent() が null を返す場合のフォールバック
+                        // アクティブなタブを取得
+                        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
+                            if (chrome.runtime.lastError) {
+                                reject(new Error(chrome.runtime.lastError.message));
+                            } else if (tabs && tabs.length > 0) {
+                                resolve(tabs[0]);
+                            } else {
+                                reject(new Error('No active tab found'));
+                            }
+                        });
+                    }
+                });
+            });
+
+            if (currentTab && currentTab.id) {
+                // 元のタブIDを記録
+                await this.storeOriginalTabId(currentTab.id);
+                console.log(`Current tab ID captured and stored: ${currentTab.id}`);
+                return currentTab.id;
+            } else {
+                console.warn('Failed to get current tab ID');
+                return null;
+            }
+
+        } catch (error) {
+            console.error('Failed to get and store current tab ID:', error);
+            
+            // フォールバック: main.html URLを持つタブを検索
+            try {
+                const mainUrl = chrome.runtime.getURL('ui/main.html');
+                const tabs = await chrome.tabs.query({ url: mainUrl });
+                
+                if (tabs.length > 0) {
+                    const fallbackTab = tabs[0];
+                    await this.storeOriginalTabId(fallbackTab.id);
+                    console.log(`Fallback: main.html tab ID stored: ${fallbackTab.id}`);
+                    return fallbackTab.id;
+                }
+            } catch (fallbackError) {
+                console.error('Fallback tab ID capture failed:', fallbackError);
+            }
+            
+            return null;
+        }
+    }
+
+    /**
      * process.htmlタブIDをストレージに記録
      * @param {number} tabId - 記録するタブID
      */
@@ -335,7 +451,7 @@ export class BatchService {
     }
 
     /**
-     * 実行ボタンのイベントハンドラー（処理順序修正版）
+     * 実行ボタンのイベントハンドラー（処理順序修正版 + 元タブID記録機能追加）
      */
     async executeButtonHandler() {
         try {
@@ -343,6 +459,21 @@ export class BatchService {
             if (this.currentState !== SENDING_STATES.IDLE && this.currentState !== SENDING_STATES.COMPLETED) {
                 this.showToast('送信処理が既に実行中です', 'warning');
                 return;
+            }
+
+            // ====================================
+            // Phase 1: 元タブID記録機能
+            // ====================================
+            
+            console.log('Capturing and storing original tab ID before sending...');
+            const originalTabId = await this.getCurrentAndStoreTabId();
+            
+            if (originalTabId) {
+                this.showToast('送信準備完了：元のタブを記録しました', 'info');
+            } else {
+                // 元タブIDの取得に失敗しても処理を続行（警告のみ）
+                console.warn('Failed to capture original tab ID, but continuing with execution');
+                this.showToast('警告：元のタブの記録に失敗しましたが、処理を続行します', 'warning');
             }
 
             // ライセンス確認
@@ -476,6 +607,7 @@ export class BatchService {
             });
 
             this.showToast('送信を開始しました', 'success');
+            console.log(`Execution started - Original tab: ${originalTabId}, Process tab: ${tab.id}`);
             
         } catch (error) {
             this.showToast('送信開始に失敗しました: ' + error.message, 'error');

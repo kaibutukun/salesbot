@@ -203,8 +203,47 @@ function checkStopped() {
 }
 
 // ====================================
-// タブライフサイクル管理機能
+// タブライフサイクル管理機能（Phase 2: 元タブID復帰機能）
 // ====================================
+
+/**
+ * 記録された元のタブID（送信開始前のタブ）を取得
+ * @returns {Promise<number|null>} タブID（なければnull）
+ */
+async function getStoredOriginalTabId() {
+    try {
+        const data = await chrome.storage.local.get(['originalTabId', 'originalTabTimestamp']);
+        
+        // タブIDが記録されていない場合
+        if (!data.originalTabId) {
+            return null;
+        }
+
+        // 記録から2時間以上経過している場合は無効とする
+        const twoHours = 2 * 60 * 60 * 1000;
+        if (data.originalTabTimestamp && (Date.now() - data.originalTabTimestamp) > twoHours) {
+            await clearOriginalTabId();
+            return null;
+        }
+
+        return data.originalTabId;
+    } catch (error) {
+        console.error('Failed to get stored original tab ID:', error);
+        return null;
+    }
+}
+
+/**
+ * 記録された元のタブIDをクリア
+ */
+async function clearOriginalTabId() {
+    try {
+        await chrome.storage.local.remove(['originalTabId', 'originalTabTimestamp']);
+        console.log('Original tab ID cleared from background');
+    } catch (error) {
+        console.error('Failed to clear original tab ID:', error);
+    }
+}
 
 /**
  * 記録されたprocess.htmlタブIDを取得
@@ -267,39 +306,111 @@ async function closeProcessTab(tabId) {
 }
 
 /**
- * main.htmlタブの検索と切り替え、またはタブ新規作成
- * @returns {Promise<number|null>} main.htmlタブのID
+ * 元のタブIDを使って元のタブに復帰する（Phase 2のメイン機能）
+ * @returns {Promise<number|null>} 復帰先タブのID
  */
-async function findOrCreateMainTab() {
+async function returnToOriginalTab() {
     try {
-        // 既存のmain.htmlタブを検索
-        const mainUrl = chrome.runtime.getURL('ui/main.html');
-        const tabs = await chrome.tabs.query({ url: mainUrl });
-
-        if (tabs.length > 0) {
-            // 既存のmain.htmlタブがある場合は切り替え
-            const mainTab = tabs[0];
-            await chrome.tabs.update(mainTab.id, { active: true });
-            await chrome.windows.update(mainTab.windowId, { focused: true });
-            console.log(`Switched to existing main tab: ${mainTab.id}`);
-            return mainTab.id;
+        console.log('returnToOriginalTab: Starting original tab restoration process');
+        
+        // ====================================
+        // Priority 1: 記録された元のタブIDに復帰
+        // ====================================
+        
+        const originalTabId = await getStoredOriginalTabId();
+        if (originalTabId) {
+            console.log(`returnToOriginalTab: Attempting to return to original tab ${originalTabId}`);
+            
+            try {
+                // 元のタブが存在し、main.htmlを表示しているかチェック
+                const originalTab = await chrome.tabs.get(originalTabId);
+                
+                if (originalTab) {
+                    const mainUrl = chrome.runtime.getURL('ui/main.html');
+                    
+                    // URLがmain.htmlかどうかチェック
+                    if (originalTab.url === mainUrl) {
+                        // 元のタブに切り替え
+                        await chrome.tabs.update(originalTabId, { active: true });
+                        await chrome.windows.update(originalTab.windowId, { focused: true });
+                        console.log(`returnToOriginalTab: Successfully returned to original tab ${originalTabId}`);
+                        
+                        // 元のタブIDをクリア（使用済み）
+                        await clearOriginalTabId();
+                        return originalTabId;
+                    } else {
+                        console.log(`returnToOriginalTab: Original tab ${originalTabId} exists but shows different URL: ${originalTab.url}`);
+                        // URLが違う場合はmain.htmlに更新
+                        await chrome.tabs.update(originalTabId, { url: 'ui/main.html', active: true });
+                        await chrome.windows.update(originalTab.windowId, { focused: true });
+                        console.log(`returnToOriginalTab: Updated original tab ${originalTabId} to main.html`);
+                        
+                        await clearOriginalTabId();
+                        return originalTabId;
+                    }
+                }
+            } catch (originalTabError) {
+                console.log(`returnToOriginalTab: Original tab ${originalTabId} no longer exists: ${originalTabError.message}`);
+                // 元のタブが存在しない場合はIDをクリア
+                await clearOriginalTabId();
+            }
         } else {
-            // main.htmlタブがない場合は新規作成
-            const newTab = await chrome.tabs.create({ url: 'ui/main.html' });
-            console.log(`Created new main tab: ${newTab.id}`);
-            return newTab.id;
+            console.log('returnToOriginalTab: No original tab ID found in storage');
         }
+
+        // ====================================
+        // Priority 2: 既存のmain.htmlタブを検索
+        // ====================================
+        
+        console.log('returnToOriginalTab: Searching for existing main.html tabs');
+        const mainUrl = chrome.runtime.getURL('ui/main.html');
+        const existingMainTabs = await chrome.tabs.query({ url: mainUrl });
+
+        if (existingMainTabs.length > 0) {
+            // 既存のmain.htmlタブがある場合は切り替え
+            const existingMainTab = existingMainTabs[0];
+            await chrome.tabs.update(existingMainTab.id, { active: true });
+            await chrome.windows.update(existingMainTab.windowId, { focused: true });
+            console.log(`returnToOriginalTab: Switched to existing main tab ${existingMainTab.id}`);
+            return existingMainTab.id;
+        }
+
+        // ====================================
+        // Priority 3: 新規main.htmlタブを作成（最後の手段）
+        // ====================================
+        
+        console.log('returnToOriginalTab: No existing main tabs found, creating new one');
+        const newTab = await chrome.tabs.create({ url: 'ui/main.html' });
+        console.log(`returnToOriginalTab: Created new main tab ${newTab.id}`);
+        return newTab.id;
+
     } catch (error) {
-        console.error('Failed to find or create main tab:', error);
-        // フォールバック：新しいタブを作成
+        console.error('returnToOriginalTab: Error during tab restoration:', error);
+        
+        // ====================================
+        // Final Fallback: エラー時の安全な処理
+        // ====================================
+        
         try {
-            const newTab = await chrome.tabs.create({ url: 'ui/main.html' });
-            return newTab.id;
+            console.log('returnToOriginalTab: Executing final fallback');
+            const fallbackTab = await chrome.tabs.create({ url: 'ui/main.html' });
+            console.log(`returnToOriginalTab: Fallback tab created ${fallbackTab.id}`);
+            return fallbackTab.id;
         } catch (fallbackError) {
-            console.error('Fallback tab creation failed:', fallbackError);
+            console.error('returnToOriginalTab: Final fallback failed:', fallbackError);
             return null;
         }
     }
+}
+
+/**
+ * main.htmlタブの検索と切り替え、またはタブ新規作成（旧版：互換性のため保持）
+ * @deprecated この関数は returnToOriginalTab() に置き換えられました
+ * @returns {Promise<number|null>} main.htmlタブのID
+ */
+async function findOrCreateMainTab() {
+    console.warn('findOrCreateMainTab: This function is deprecated. Use returnToOriginalTab() instead.');
+    return await returnToOriginalTab();
 }
 
 // Chrome拡張機能イベントリスナー
@@ -767,10 +878,11 @@ async function notifyAllTabsStopCompleted() {
 
 /**
  * 停止完了通知（タブライフサイクル管理 + 全タブ通知システム統合版）
+ * Phase 2: returnToOriginalTab()を使用した元タブ復帰機能を実装
  */
 async function notifyStopCompleted() {
     try {
-        console.log('notifyStopCompleted: Starting integrated tab management and notification');
+        console.log('notifyStopCompleted: Starting integrated tab management and notification with original tab return');
         
         // ====================================
         // Phase 1: 全タブへの停止完了通知（解決策E）
@@ -780,7 +892,7 @@ async function notifyStopCompleted() {
         console.log('notifyStopCompleted: Tab notification phase completed:', notificationResult);
 
         // ====================================
-        // Phase 2: タブライフサイクル管理（解決策C）
+        // Phase 2: タブライフサイクル管理（解決策C + Phase 2機能）
         // ====================================
         
         // 記録されたprocess.htmlタブを取得して閉じる
@@ -800,36 +912,52 @@ async function notifyStopCompleted() {
             console.log('notifyStopCompleted: No specific process tab ID found, relying on general notification');
         }
 
-        // main.htmlタブを検索して切り替え、なければ新規作成
-        const mainTabId = await findOrCreateMainTab();
-        if (mainTabId) {
-            console.log(`notifyStopCompleted: Main tab managed successfully: ${mainTabId}`);
+        // ====================================
+        // Phase 2 メイン機能: 元のタブに復帰
+        // ====================================
+        
+        const returnedTabId = await returnToOriginalTab();
+        if (returnedTabId) {
+            console.log(`notifyStopCompleted: Successfully returned to tab ${returnedTabId}`);
+        } else {
+            console.log('notifyStopCompleted: Failed to return to original tab');
         }
 
-        console.log('notifyStopCompleted: Integrated tab management completed successfully');
+        console.log('notifyStopCompleted: Integrated tab management with original tab return completed successfully');
         
         return {
             notificationResult,
             processTabClosed: !!processTabId,
-            mainTabId
+            returnedTabId,
+            originalTabReturn: !!returnedTabId
         };
 
     } catch (error) {
         console.error('notifyStopCompleted: Error during integrated tab management:', error);
         
-        // エラーが発生してもフォールバック処理を実行
+        // ====================================
+        // エラー時のフォールバック処理
+        // ====================================
+        
         try {
-            // 最低限、main.htmlタブを作成
-            await chrome.tabs.create({ url: 'ui/main.html' });
-            console.log('notifyStopCompleted: Fallback main tab created');
+            // 最低限、main.htmlタブを作成（最後の手段）
+            const fallbackTab = await chrome.tabs.create({ url: 'ui/main.html' });
+            console.log(`notifyStopCompleted: Fallback main tab created: ${fallbackTab.id}`);
+            
+            return {
+                error: error.message,
+                fallbackExecuted: true,
+                fallbackTabId: fallbackTab.id
+            };
         } catch (fallbackError) {
             console.error('notifyStopCompleted: Fallback tab creation failed:', fallbackError);
+            
+            return {
+                error: error.message,
+                fallbackError: fallbackError.message,
+                fallbackExecuted: false
+            };
         }
-        
-        return {
-            error: error.message,
-            fallbackExecuted: true
-        };
     }
 }
 
