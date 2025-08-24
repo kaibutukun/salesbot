@@ -1,20 +1,28 @@
-// Service Workerç”¨ã®Supabaseèª­ã¿è¾¼ã¿
+// background.js - Service Worker（タブ管理修正版）
+// 修正: process.html→done.html遷移時の新しいタブ作成問題を解消
+
+// Service WorkerでのSupabase読み込み
 importScripts('supabase/supabase.js');
 
-// Supabaseè¨­å®š
+// ====================================
+// 定数定義
+// ====================================
+
 const SUPABASE_CONFIG = {
     url: 'https://mqibubhzyvlprhekdjvf.supabase.co',
     anonKey: 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Im1xaWJ1Ymh6eXZscHJoZWtkanZmIiwicm9sZSI6ImFub24iLCJpYXQiOjE3NDc5MTcyMDgsImV4cCI6MjA2MzQ5MzIwOH0.RsiLZLsbL2A8dbs2e7lmYMl0gzFuvSkq70pdABr2a_I'
 };
 
-// å®šæ•°å®šç¾©
+// バッチ処理設定
 const BATCH_SIZE = 100;
-const BATCH_DELAY = 30000; // 30ç§’
-const KEEPALIVE_INTERVAL = 20000; // 20ç§’
-const URL_PROCESSING_TIMEOUT = 90000; // 90ç§’
-const FORM_TIMEOUT = 5000; // 5ç§’
-const SEND_TIMEOUT = 10000; // 10ç§’
-const RECAPTCHA_TIMEOUT = 40000; // 40ç§’
+const BATCH_DELAY = 30000; // 30秒
+const KEEPALIVE_INTERVAL = 20000; // 20秒
+const URL_PROCESSING_TIMEOUT = 90000; // 90秒
+const FORM_TIMEOUT = 5000; // 5秒
+const SEND_TIMEOUT = 10000; // 10秒
+const RECAPTCHA_TIMEOUT = 40000; // 40秒
+
+// アクション定数
 const ACTION_EXPLORE = "explore";
 const ACTION_SEND = "send";
 const ACTION_STOP = "stop";
@@ -23,9 +31,12 @@ const ACTION_CONFIRM = "confirm";
 const ACTION_RECHECK = "recheck";
 const ACTION_EXECUTE = "execute";
 const ERROR_STOP_REQUESTED = 'STOP_REQUESTED';
-const TIMEOUT_MESSAGE_TEMPLATE = (seconds) => `å‡¦ç†ã‚¿ã‚¤ãƒ ã‚¢ã‚¦ãƒˆï¼ˆ${seconds}ç§’çµŒéŽï¼‰`;
+const TIMEOUT_MESSAGE_TEMPLATE = (seconds) => `処理タイムアウト（${seconds}秒経過）`;
 
-// Supabaseã‚¯ãƒ©ã‚¤ã‚¢ãƒ³ãƒˆä½œæˆ
+// ====================================
+// Supabaseクライアント初期化
+// ====================================
+
 function createSupabaseClient() {
     if (typeof supabase === 'undefined') {
         throw new Error('Supabase library is not loaded.');
@@ -33,7 +44,17 @@ function createSupabaseClient() {
     return supabase.createClient(SUPABASE_CONFIG.url, SUPABASE_CONFIG.anonKey);
 }
 
-// IndexedDBæ“ä½œã‚¯ãƒ©ã‚¹
+let supabaseClient = null;
+try {
+    supabaseClient = createSupabaseClient();
+} catch (error) {
+    console.error('Supabase initialization failed:', error);
+}
+
+// ====================================
+// IndexedDBクラス定義
+// ====================================
+
 class ExDB {
     constructor() {
         this.db = null;
@@ -165,20 +186,15 @@ class ExDB {
     }
 }
 
-// Supabaseã‚¯ãƒ©ã‚¤ã‚¢ãƒ³ãƒˆåˆæœŸåŒ–
-let supabaseClient = null;
-try {
-    supabaseClient = createSupabaseClient();
-} catch (error) {
-    console.error('Supabase initialization failed:', error);
-}
+// ====================================
+// グローバル状態管理
+// ====================================
 
-// ã‚°ãƒ­ãƒ¼ãƒãƒ«çŠ¶æ…‹ç®¡ç†
 let keepaliveInterval = null;
 let isStopping = false;
 let activePromiseRejects = new Set();
 
-// åœæ­¢å‡¦ç†é–¢é€£
+// 停止状態関連
 function resetStopState() {
     isStopping = false;
     activePromiseRejects.clear();
@@ -190,7 +206,7 @@ function executeStop() {
         try {
             reject(new Error(ERROR_STOP_REQUESTED));
         } catch (e) {
-            // ã‚¨ãƒ©ãƒ¼ã‚’ç„¡è¦–
+            // エラーを無視
         }
     });
     activePromiseRejects.clear();
@@ -203,23 +219,22 @@ function checkStopped() {
 }
 
 // ====================================
-// ã‚¿ãƒ–ãƒ©ã‚¤ãƒ•ã‚µã‚¤ã‚¯ãƒ«ç®¡ç†æ©Ÿèƒ½ï¼ˆPhase 2: å…ƒã‚¿ãƒ–IDå¾©å¸°æ©Ÿèƒ½ï¼‰
+// 最適化されたタブ管理システム（修正版）
 // ====================================
 
 /**
- * è¨˜éŒ²ã•ã‚ŒãŸå…ƒã®ã‚¿ãƒ–IDï¼ˆé€ä¿¡é–‹å§‹å‰ã®ã‚¿ãƒ–ï¼‰ã‚’å–å¾—
- * @returns {Promise<number|null>} ã‚¿ãƒ–IDï¼ˆãªã‘ã‚Œã°nullï¼‰
+ * 記録された元のタブID（送信開始前のタブ）を取得
+ * @returns {Promise<number|null>} タブID（なければnull）
  */
 async function getStoredOriginalTabId() {
     try {
         const data = await chrome.storage.local.get(['originalTabId', 'originalTabTimestamp']);
         
-        // ã‚¿ãƒ–IDãŒè¨˜éŒ²ã•ã‚Œã¦ã„ãªã„å ´åˆ
         if (!data.originalTabId) {
             return null;
         }
 
-        // è¨˜éŒ²ã‹ã‚‰2æ™‚é–“ä»¥ä¸ŠçµŒéŽã—ã¦ã„ã‚‹å ´åˆã¯ç„¡åŠ¹ã¨ã™ã‚‹
+        // 記録から2時間以上経過している場合は無効とする
         const twoHours = 2 * 60 * 60 * 1000;
         if (data.originalTabTimestamp && (Date.now() - data.originalTabTimestamp) > twoHours) {
             await clearOriginalTabId();
@@ -234,7 +249,7 @@ async function getStoredOriginalTabId() {
 }
 
 /**
- * è¨˜éŒ²ã•ã‚ŒãŸå…ƒã®ã‚¿ãƒ–IDã‚’ã‚¯ãƒªã‚¢
+ * 記録された元のタブIDをクリア
  */
 async function clearOriginalTabId() {
     try {
@@ -246,19 +261,18 @@ async function clearOriginalTabId() {
 }
 
 /**
- * è¨˜éŒ²ã•ã‚ŒãŸprocess.htmlã‚¿ãƒ–IDã‚’å–å¾—
- * @returns {Promise<number|null>} ã‚¿ãƒ–IDï¼ˆãªã‘ã‚Œã°nullï¼‰
+ * 記録されたprocess.htmlタブIDを取得
+ * @returns {Promise<number|null>} タブID（なければnull）
  */
 async function getStoredProcessTabId() {
     try {
         const data = await chrome.storage.local.get(['processTabId', 'processTabTimestamp']);
         
-        // ã‚¿ãƒ–IDãŒè¨˜éŒ²ã•ã‚Œã¦ã„ãªã„å ´åˆ
         if (!data.processTabId) {
             return null;
         }
 
-        // è¨˜éŒ²ã‹ã‚‰1æ™‚é–“ä»¥ä¸ŠçµŒéŽã—ã¦ã„ã‚‹å ´åˆã¯ç„¡åŠ¹ã¨ã™ã‚‹
+        // 記録から1時間以上経過している場合は無効とする
         const oneHour = 60 * 60 * 1000;
         if (data.processTabTimestamp && (Date.now() - data.processTabTimestamp) > oneHour) {
             await clearProcessTabId();
@@ -273,7 +287,7 @@ async function getStoredProcessTabId() {
 }
 
 /**
- * è¨˜éŒ²ã•ã‚ŒãŸprocess.htmlã‚¿ãƒ–IDã‚’ã‚¯ãƒªã‚¢
+ * 記録されたprocess.htmlタブIDをクリア
  */
 async function clearProcessTabId() {
     try {
@@ -285,135 +299,64 @@ async function clearProcessTabId() {
 }
 
 /**
- * process.htmlã‚¿ãƒ–ã‚’å®‰å…¨ã«é–‰ã˜ã‚‹
- * @param {number} tabId - é–‰ã˜ã‚‹ã‚¿ãƒ–ID
- * @returns {Promise<boolean>} æˆåŠŸæ™‚ã¯true
+ * 停止完了通知を全関連タブに送信（最小限のタブ操作）
+ * 修正：新しいタブ作成を行わず、通知のみを送信
  */
-async function closeProcessTab(tabId) {
+async function notifyAllTabsStopCompleted() {
     try {
-        // ã‚¿ãƒ–ãŒå­˜åœ¨ã™ã‚‹ã‹ãƒã‚§ãƒƒã‚¯
-        const tab = await chrome.tabs.get(tabId);
-        if (tab && tab.url && tab.url.includes('ui/process.html')) {
-            await chrome.tabs.remove(tabId);
-            console.log(`Process tab closed: ${tabId}`);
-            return true;
-        }
-    } catch (error) {
-        // ã‚¿ãƒ–ãŒæ—¢ã«é–‰ã˜ã‚‰ã‚Œã¦ã„ã‚‹å ´åˆãªã©ã€ã‚¨ãƒ©ãƒ¼ã¯æ­£å¸¸
-        console.log(`Process tab ${tabId} was already closed or not found`);
-    }
-    return false;
-}
+        console.log('notifyAllTabsStopCompleted: Sending stop notification to related tabs');
+        
+        const targetUrls = [
+            chrome.runtime.getURL('ui/main.html'),
+            chrome.runtime.getURL('ui/process.html')
+        ];
 
-/**
- * å…ƒã®ã‚¿ãƒ–IDã‚’ä½¿ã£ã¦å…ƒã®ã‚¿ãƒ–ã«å¾©å¸°ã™ã‚‹ï¼ˆPhase 2ã®ãƒ¡ã‚¤ãƒ³æ©Ÿèƒ½ï¼‰
- * @returns {Promise<number|null>} å¾©å¸°å…ˆã‚¿ãƒ–ã®ID
- */
-async function returnToOriginalTab() {
-    try {
-        console.log('returnToOriginalTab: Starting original tab restoration process');
-        
-        // ====================================
-        // Priority 1: è¨˜éŒ²ã•ã‚ŒãŸå…ƒã®ã‚¿ãƒ–IDã«å¾©å¸°
-        // ====================================
-        
-        const originalTabId = await getStoredOriginalTabId();
-        if (originalTabId) {
-            console.log(`returnToOriginalTab: Attempting to return to original tab ${originalTabId}`);
-            
+        const allTabs = await chrome.tabs.query({ url: targetUrls });
+        console.log(`notifyAllTabsStopCompleted: Found ${allTabs.length} related tabs`);
+
+        // 各タブに停止完了通知を送信（タブ操作は行わない）
+        const notificationPromises = allTabs.map(async (tab) => {
             try {
-                // å…ƒã®ã‚¿ãƒ–ãŒå­˜åœ¨ã—ã€main.htmlã‚’è¡¨ç¤ºã—ã¦ã„ã‚‹ã‹ãƒã‚§ãƒƒã‚¯
-                const originalTab = await chrome.tabs.get(originalTabId);
-                
-                if (originalTab) {
-                    const mainUrl = chrome.runtime.getURL('ui/main.html');
-                    
-                    // URLãŒmain.htmlã‹ã©ã†ã‹ãƒã‚§ãƒƒã‚¯
-                    if (originalTab.url === mainUrl) {
-                        // å…ƒã®ã‚¿ãƒ–ã«åˆ‡ã‚Šæ›¿ãˆ
-                        await chrome.tabs.update(originalTabId, { active: true });
-                        await chrome.windows.update(originalTab.windowId, { focused: true });
-                        console.log(`returnToOriginalTab: Successfully returned to original tab ${originalTabId}`);
-                        
-                        // å…ƒã®ã‚¿ãƒ–IDã‚’ã‚¯ãƒªã‚¢ï¼ˆä½¿ç”¨æ¸ˆã¿ï¼‰
-                        await clearOriginalTabId();
-                        return originalTabId;
-                    } else {
-                        console.log(`returnToOriginalTab: Original tab ${originalTabId} exists but shows different URL: ${originalTab.url}`);
-                        // URLãŒé•ã†å ´åˆã¯main.htmlã«æ›´æ–°
-                        await chrome.tabs.update(originalTabId, { url: 'ui/main.html', active: true });
-                        await chrome.windows.update(originalTab.windowId, { focused: true });
-                        console.log(`returnToOriginalTab: Updated original tab ${originalTabId} to main.html`);
-                        
-                        await clearOriginalTabId();
-                        return originalTabId;
-                    }
-                }
-            } catch (originalTabError) {
-                console.log(`returnToOriginalTab: Original tab ${originalTabId} no longer exists: ${originalTabError.message}`);
-                // å…ƒã®ã‚¿ãƒ–ãŒå­˜åœ¨ã—ãªã„å ´åˆã¯IDã‚’ã‚¯ãƒªã‚¢
-                await clearOriginalTabId();
+                await chrome.tabs.sendMessage(tab.id, { 
+                    action: ACTION_STOP_COMPLETED,
+                    timestamp: Date.now()
+                });
+                console.log(`notifyAllTabsStopCompleted: Successfully notified tab ${tab.id}`);
+                return { tabId: tab.id, success: true };
+            } catch (error) {
+                console.log(`notifyAllTabsStopCompleted: Failed to notify tab ${tab.id}: ${error.message}`);
+                return { tabId: tab.id, success: false, error: error.message };
             }
-        } else {
-            console.log('returnToOriginalTab: No original tab ID found in storage');
-        }
+        });
 
-        // ====================================
-        // Priority 2: æ—¢å­˜ã®main.htmlã‚¿ãƒ–ã‚’æ¤œç´¢
-        // ====================================
+        const results = await Promise.all(notificationPromises);
+        const successful = results.filter(r => r.success).length;
+        const failed = results.filter(r => !r.success).length;
         
-        console.log('returnToOriginalTab: Searching for existing main.html tabs');
-        const mainUrl = chrome.runtime.getURL('ui/main.html');
-        const existingMainTabs = await chrome.tabs.query({ url: mainUrl });
+        console.log(`notifyAllTabsStopCompleted: Notification results - Success: ${successful}, Failed: ${failed}`);
 
-        if (existingMainTabs.length > 0) {
-            // æ—¢å­˜ã®main.htmlã‚¿ãƒ–ãŒã‚ã‚‹å ´åˆã¯åˆ‡ã‚Šæ›¿ãˆ
-            const existingMainTab = existingMainTabs[0];
-            await chrome.tabs.update(existingMainTab.id, { active: true });
-            await chrome.windows.update(existingMainTab.windowId, { focused: true });
-            console.log(`returnToOriginalTab: Switched to existing main tab ${existingMainTab.id}`);
-            return existingMainTab.id;
-        }
-
-        // ====================================
-        // Priority 3: æ–°è¦main.htmlã‚¿ãƒ–ã‚’ä½œæˆï¼ˆæœ€å¾Œã®æ‰‹æ®µï¼‰
-        // ====================================
-        
-        console.log('returnToOriginalTab: No existing main tabs found, creating new one');
-        const newTab = await chrome.tabs.create({ url: 'ui/main.html' });
-        console.log(`returnToOriginalTab: Created new main tab ${newTab.id}`);
-        return newTab.id;
+        return {
+            total: allTabs.length,
+            successful,
+            failed,
+            results
+        };
 
     } catch (error) {
-        console.error('returnToOriginalTab: Error during tab restoration:', error);
-        
-        // ====================================
-        // Final Fallback: ã‚¨ãƒ©ãƒ¼æ™‚ã®å®‰å…¨ãªå‡¦ç†
-        // ====================================
-        
-        try {
-            console.log('returnToOriginalTab: Executing final fallback');
-            const fallbackTab = await chrome.tabs.create({ url: 'ui/main.html' });
-            console.log(`returnToOriginalTab: Fallback tab created ${fallbackTab.id}`);
-            return fallbackTab.id;
-        } catch (fallbackError) {
-            console.error('returnToOriginalTab: Final fallback failed:', fallbackError);
-            return null;
-        }
+        console.error('notifyAllTabsStopCompleted: Error during tab notification:', error);
+        return {
+            total: 0,
+            successful: 0,
+            failed: 0,
+            error: error.message
+        };
     }
 }
 
-/**
- * main.htmlã‚¿ãƒ–ã®æ¤œç´¢ã¨åˆ‡ã‚Šæ›¿ãˆã€ã¾ãŸã¯ã‚¿ãƒ–æ–°è¦ä½œæˆï¼ˆæ—§ç‰ˆï¼šäº’æ›æ€§ã®ãŸã‚ä¿æŒï¼‰
- * @deprecated ã“ã®é–¢æ•°ã¯ returnToOriginalTab() ã«ç½®ãæ›ãˆã‚‰ã‚Œã¾ã—ãŸ
- * @returns {Promise<number|null>} main.htmlã‚¿ãƒ–ã®ID
- */
-async function findOrCreateMainTab() {
-    console.warn('findOrCreateMainTab: This function is deprecated. Use returnToOriginalTab() instead.');
-    return await returnToOriginalTab();
-}
+// ====================================
+// Chrome拡張機能イベントリスナー
+// ====================================
 
-// Chromeæ‹¡å¼µæ©Ÿèƒ½ã‚¤ãƒ™ãƒ³ãƒˆãƒªã‚¹ãƒŠãƒ¼
 chrome.action.onClicked.addListener(async (tab) => {
     try {
         const { data: { user } } = await supabaseClient.auth.getUser();
@@ -423,7 +366,10 @@ chrome.action.onClicked.addListener(async (tab) => {
     }
 });
 
-// ãƒšãƒ¼ã‚¸èª­ã¿è¾¼ã¿å¾…æ©Ÿ
+// ====================================
+// ページ読み込み待機
+// ====================================
+
 async function waitForPageLoad(tabId) {
     return new Promise(resolve => {
         chrome.tabs.onUpdated.addListener(function listener(id, changeInfo) {
@@ -437,7 +383,10 @@ async function waitForPageLoad(tabId) {
     });
 }
 
-// URLå‡¦ç†ãƒ¡ã‚¤ãƒ³é–¢æ•°
+// ====================================
+// URL処理メイン関数
+// ====================================
+
 async function navigateAndExecuteScript(tabId, url, sentUrlList, excludeDomains) {
     return Promise.race([
         executeUrlProcessing(tabId, url, sentUrlList, excludeDomains),
@@ -445,7 +394,7 @@ async function navigateAndExecuteScript(tabId, url, sentUrlList, excludeDomains)
             setTimeout(() => {
                 resolve({
                     url: url,
-                    result: "å¤±æ•—",
+                    result: "失敗",
                     contact: "",
                     reason: TIMEOUT_MESSAGE_TEMPLATE(URL_PROCESSING_TIMEOUT / 1000)
                 });
@@ -454,47 +403,46 @@ async function navigateAndExecuteScript(tabId, url, sentUrlList, excludeDomains)
     ]);
 }
 
-// URLå‡¦ç†å®Ÿè¡Œ
 async function executeUrlProcessing(tabId, url, sentUrlList, excludeDomains) {
     if (isStopping) {
         return {
             url: url,
-            result: "åœæ­¢",
+            result: "停止",
             contact: "",
-            reason: "ãƒ¦ãƒ¼ã‚¶ãƒ¼ã«ã‚ˆã£ã¦åœæ­¢ã•ã‚Œã¾ã—ãŸ"
+            reason: "ユーザーによって停止されました"
         };
     }
 
-    // URLã¨ã‚¿ã‚°ã‚’åˆ†é›¢
+    // URLとタグを分離
     let parts = url.split(',');
     url = parts[0];
     let tags = parts.slice(1);
 
-    // é™¤å¤–ãƒ‰ãƒ¡ã‚¤ãƒ³ãƒã‚§ãƒƒã‚¯
+    // 除外ドメインチェック
     if (excludeDomains && excludeDomains.length > 0) {
         for (let i = 0; i < excludeDomains.length; i++) {
             if (excludeDomains[i] !== "" && url.includes(excludeDomains[i])) {
                 return {
                     url: url,
-                    result: "å¤±æ•—",
+                    result: "失敗",
                     contact: "",
-                    reason: "é™¤å¤–ãƒ‰ãƒ¡ã‚¤ãƒ³ã®ãŸã‚é€ä¿¡ã—ãªã„"
+                    reason: "除外ドメインのため送信しない"
                 };
             }
         }
     }
 
-    // ãƒšãƒ¼ã‚¸ã«ç§»å‹•
+    // ページに移動
     await chrome.tabs.update(tabId, { url: url });
     await waitForPageLoad(tabId);
 
-    // æŽ¢ç´¢ã‚¹ã‚¯ãƒªãƒ—ãƒˆå®Ÿè¡Œ
+    // 探索スクリプト実行
     chrome.scripting.executeScript({
         target: { tabId: tabId },
         files: ["content-scripts/explore.js"]
     });
 
-    // æŽ¢ç´¢çµæžœå¾…æ©Ÿ
+    // 探索結果待機
     let exploreResult = await new Promise(resolve => {
         chrome.runtime.onMessage.addListener(function listener(message, sender) {
             if (sender.tab.id === tabId && message.action === ACTION_EXPLORE) {
@@ -515,7 +463,7 @@ async function executeUrlProcessing(tabId, url, sentUrlList, excludeDomains) {
 
     let originalResult = exploreResult;
 
-    // ã‚³ãƒ³ã‚¿ã‚¯ãƒˆãƒªãƒ³ã‚¯ãŒè¦‹ã¤ã‹ã£ãŸå ´åˆã¯å†åº¦ãƒã‚§ãƒƒã‚¯
+    // コンタクトリンクが見つかった場合は移動
     if (exploreResult.success && !exploreResult.currentForm && exploreResult.contactLink) {
         await chrome.tabs.update(tabId, { url: exploreResult.contactLink });
         await waitForPageLoad(tabId);
@@ -543,39 +491,39 @@ async function executeUrlProcessing(tabId, url, sentUrlList, excludeDomains) {
     if (exploreResult.success) {
         let contactUrl = exploreResult.currentForm ? currentUrl : exploreResult.contactLink;
 
-        // é™¤å¤–ãƒ‰ãƒ¡ã‚¤ãƒ³ãƒã‚§ãƒƒã‚¯ï¼ˆã‚³ãƒ³ã‚¿ã‚¯ãƒˆURLï¼‰
+        // 除外ドメインチェック（コンタクトURL）
         if (excludeDomains && excludeDomains.length > 0) {
             for (let i = 0; i < excludeDomains.length; i++) {
                 if (excludeDomains[i] !== "" && contactUrl.includes(excludeDomains[i])) {
                     return {
                         url: url,
-                        result: "å¤±æ•—",
+                        result: "失敗",
                         contact: contactUrl,
-                        reason: "é™¤å¤–ãƒ‰ãƒ¡ã‚¤ãƒ³ã®ãŸã‚é€ä¿¡ã—ãªã„"
+                        reason: "除外ドメインのため送信しない"
                     };
                 }
             }
         }
 
-        // é‡è¤‡é€ä¿¡ãƒã‚§ãƒƒã‚¯
+        // 重複送信チェック
         if (sentUrlList.includes(contactUrl)) {
             return {
                 url: url,
-                result: "å¤±æ•—",
+                result: "失敗",
                 contact: contactUrl,
-                reason: "é‡è¤‡é€ä¿¡ã®ãŸã‚é€ä¿¡ã—ãªã„"
+                reason: "重複送信のため送信しない"
             };
         }
     } else {
         return {
             url: url,
-            result: "å¤±æ•—",
+            result: "失敗",
             contact: "",
-            reason: "å•ã„åˆã‚ã›ãƒ•ã‚©ãƒ¼ãƒ ãŒè¦‹ã¤ã‹ã‚Šã¾ã›ã‚“ã§ã—ãŸ"
+            reason: "問い合わせフォームが見つかりませんでした"
         };
     }
 
-    // ãƒ•ã‚©ãƒ¼ãƒ é€ä¿¡å‡¦ç†
+    // フォーム送信処理
     if (exploreResult.currentForm) {
         return await processFormSubmission(tabId, url, currentUrl, tags);
     } else {
@@ -585,9 +533,12 @@ async function executeUrlProcessing(tabId, url, sentUrlList, excludeDomains) {
     }
 }
 
-// ãƒ•ã‚©ãƒ¼ãƒ é€ä¿¡å‡¦ç†
+// ====================================
+// フォーム送信処理
+// ====================================
+
 async function processFormSubmission(tabId, originalUrl, contactUrl, tags) {
-    // reCAPTCHAãƒã‚§ãƒƒã‚¯
+    // reCAPTCHAチェック
     chrome.scripting.executeScript({
         target: { tabId: tabId },
         files: ["content-scripts/recheck.js"]
@@ -609,7 +560,7 @@ async function processFormSubmission(tabId, originalUrl, contactUrl, tags) {
         }, FORM_TIMEOUT);
     });
 
-    // é€ä¿¡ã‚¹ã‚¯ãƒªãƒ—ãƒˆå®Ÿè¡Œ
+    // 送信スクリプト実行
     chrome.scripting.executeScript({
         target: { tabId: tabId },
         files: ["content-scripts/send.js"]
@@ -640,13 +591,13 @@ async function processFormSubmission(tabId, originalUrl, contactUrl, tags) {
     if (!sendResult.success) {
         return {
             url: originalUrl,
-            result: "å¤±æ•—",
+            result: "失敗",
             contact: contactUrl,
             reason: sendResult.message
         };
     }
 
-    // ç¢ºèªå‡¦ç†
+    // 確認処理
     await chrome.tabs.get(tabId);
     chrome.scripting.executeScript({
         target: { tabId: tabId },
@@ -671,13 +622,16 @@ async function processFormSubmission(tabId, originalUrl, contactUrl, tags) {
 
     return {
         url: originalUrl,
-        result: confirmResult.success ? "æˆåŠŸ" : "å¤±æ•—",
+        result: confirmResult.success ? "成功" : "失敗",
         contact: contactUrl,
-        reason: confirmResult.success ? "æˆåŠŸ" : confirmResult.message
+        reason: confirmResult.success ? "成功" : confirmResult.message
     };
 }
 
-// æ™‚é–“åˆ¶é™ãƒã‚§ãƒƒã‚¯
+// ====================================
+// ユーティリティ関数
+// ====================================
+
 async function isTimeRestricted() {
     try {
         const timeSettingsData = await chrome.storage.sync.get([
@@ -721,13 +675,12 @@ async function isTimeRestricted() {
     }
 }
 
-// ã‚­ãƒ¼ãƒ—ã‚¢ãƒ©ã‚¤ãƒ–å‡¦ç†
 function startKeepalive() {
     if (keepaliveInterval) {
         clearInterval(keepaliveInterval);
     }
     keepaliveInterval = setInterval(() => {
-        // ç©ºã®å‡¦ç†ã§ãƒ—ãƒ­ã‚»ã‚¹ã‚’ç¶­æŒ
+        // 空の処理でプロセスを継続
     }, KEEPALIVE_INTERVAL);
 }
 
@@ -738,7 +691,6 @@ function stopKeepalive() {
     }
 }
 
-// é€²æ—æ›´æ–°
 async function updateProgress(todoId, urlIndex, result) {
     try {
         const db = new ExDB();
@@ -749,18 +701,17 @@ async function updateProgress(todoId, urlIndex, result) {
             await db.updateTodo(todoId, { description: todo.description });
         }
     } catch (error) {
-        // ã‚¨ãƒ©ãƒ¼ã‚’ç„¡è¦–
+        // エラーを無視
     }
 }
 
-// ãƒãƒƒãƒä¼‘æ†©å‡¦ç†
 async function batchBreak(batchNumber, totalBatches, tabId) {
     try {
         await chrome.tabs.update(tabId, {
-            url: `data:text/html,<html><head><meta charset="UTF-8"><title>å‡¦ç†æœ€é©åŒ–ä¸­...</title><style>body{font-family:sans-serif;text-align:center;padding:50px;background:#f8f9fa;color:#202124;}h1{color:#4285f4;}p{margin:10px 0;}</style></head><body><h1>å‡¦ç†æœ€é©åŒ–ä¸­...</h1><p>ã‚µãƒ¼ãƒãƒ¼è² è·è»½æ¸›ã®ãŸã‚å°‘ã—å¾…æ©Ÿã—ã¦ã„ã¾ã™</p><p>ã“ã®ãƒšãƒ¼ã‚¸ã¯è‡ªå‹•çš„ã«é–‰ã˜ã‚‰ã‚Œã¾ã™</p><p>åœæ­¢ãƒœã‚¿ãƒ³ã§å‡¦ç†ã‚’ä¸­æ–­ã§ãã¾ã™</p></body></html>`
+            url: `data:text/html,<html><head><meta charset="UTF-8"><title>処理休憩中...</title><style>body{font-family:sans-serif;text-align:center;padding:50px;background:#f8f9fa;color:#202124;}h1{color:#4285f4;}p{margin:10px 0;}</style></head><body><h1>処理休憩中...</h1><p>サーバー負荷軽減のため少し待機しています</p><p>このページは自動的に閉じられます</p><p>停止ボタンで処理を中断できます</p></body></html>`
         });
     } catch (error) {
-        // ã‚¨ãƒ©ãƒ¼ã‚’ç„¡è¦–
+        // エラーを無視
     }
 
     return new Promise((resolve, reject) => {
@@ -800,7 +751,7 @@ async function batchBreak(batchNumber, totalBatches, tabId) {
                         batchProgress: `${batchNumber}_${currentIteration + 1}_${Date.now()}`
                     });
                 } catch (keepAliveError) {
-                    // ã‚¨ãƒ©ãƒ¼ã‚’ç„¡è¦–
+                    // エラーを無視
                 }
 
                 currentIteration++;
@@ -812,156 +763,6 @@ async function batchBreak(batchNumber, totalBatches, tabId) {
     });
 }
 
-// ====================================
-// å…¨ã‚¿ãƒ–å¯¾å¿œé€šçŸ¥ã‚·ã‚¹ãƒ†ãƒ ï¼ˆè§£æ±ºç­–Eï¼‰
-// ====================================
-
-/**
- * åœæ­¢å®Œäº†é€šçŸ¥ã‚’å…¨é–¢é€£ã‚¿ãƒ–ã«é€ä¿¡
- * main.htmlã¨process.htmlã®ä¸¡æ–¹ã®ã‚¿ãƒ–ã«é€šçŸ¥ã‚’é…ä¿¡
- */
-async function notifyAllTabsStopCompleted() {
-    try {
-        console.log('notifyAllTabsStopCompleted: Starting comprehensive tab notification');
-        
-        // å¯¾è±¡ã¨ãªã‚‹URLãƒ‘ã‚¿ãƒ¼ãƒ³ã‚’å®šç¾©
-        const targetUrls = [
-            chrome.runtime.getURL('ui/main.html'),
-            chrome.runtime.getURL('ui/process.html')
-        ];
-
-        // ã™ã¹ã¦ã®é–¢é€£ã‚¿ãƒ–ã‚’æ¤œç´¢
-        const allTabs = await chrome.tabs.query({ url: targetUrls });
-        console.log(`notifyAllTabsStopCompleted: Found ${allTabs.length} related tabs`);
-
-        // å„ã‚¿ãƒ–ã«åœæ­¢å®Œäº†é€šçŸ¥ã‚’é€ä¿¡
-        const notificationPromises = allTabs.map(async (tab) => {
-            try {
-                await chrome.tabs.sendMessage(tab.id, { 
-                    action: ACTION_STOP_COMPLETED,
-                    timestamp: Date.now()
-                });
-                console.log(`notifyAllTabsStopCompleted: Successfully notified tab ${tab.id} (${tab.url})`);
-                return { tabId: tab.id, success: true };
-            } catch (error) {
-                // ã‚¿ãƒ–ãŒæ—¢ã«é–‰ã˜ã‚‰ã‚Œã¦ã„ã‚‹å ´åˆã‚„å¿œç­”ãŒãªã„å ´åˆã¯ã‚¨ãƒ©ãƒ¼ã‚’è¨˜éŒ²
-                console.log(`notifyAllTabsStopCompleted: Failed to notify tab ${tab.id}: ${error.message}`);
-                return { tabId: tab.id, success: false, error: error.message };
-            }
-        });
-
-        // ã™ã¹ã¦ã®é€šçŸ¥å®Œäº†ã‚’å¾…ã¤
-        const results = await Promise.all(notificationPromises);
-        
-        // çµæžœã‚’ãƒ­ã‚°å‡ºåŠ›
-        const successful = results.filter(r => r.success).length;
-        const failed = results.filter(r => !r.success).length;
-        console.log(`notifyAllTabsStopCompleted: Notification results - Success: ${successful}, Failed: ${failed}`);
-
-        return {
-            total: allTabs.length,
-            successful,
-            failed,
-            results
-        };
-
-    } catch (error) {
-        console.error('notifyAllTabsStopCompleted: Error during tab notification:', error);
-        return {
-            total: 0,
-            successful: 0,
-            failed: 0,
-            error: error.message
-        };
-    }
-}
-
-/**
- * åœæ­¢å®Œäº†é€šçŸ¥ï¼ˆã‚¿ãƒ–ãƒ©ã‚¤ãƒ•ã‚µã‚¤ã‚¯ãƒ«ç®¡ç† + å…¨ã‚¿ãƒ–é€šçŸ¥ã‚·ã‚¹ãƒ†ãƒ çµ±åˆç‰ˆï¼‰
- * Phase 2: returnToOriginalTab()ã‚’ä½¿ç”¨ã—ãŸå…ƒã‚¿ãƒ–å¾©å¸°æ©Ÿèƒ½ã‚’å®Ÿè£…
- */
-async function notifyStopCompleted() {
-    try {
-        console.log('notifyStopCompleted: Starting integrated tab management and notification with original tab return');
-        
-        // ====================================
-        // Phase 1: å…¨ã‚¿ãƒ–ã¸ã®åœæ­¢å®Œäº†é€šçŸ¥ï¼ˆè§£æ±ºç­–Eï¼‰
-        // ====================================
-        
-        const notificationResult = await notifyAllTabsStopCompleted();
-        console.log('notifyStopCompleted: Tab notification phase completed:', notificationResult);
-
-        // ====================================
-        // Phase 2: ã‚¿ãƒ–ãƒ©ã‚¤ãƒ•ã‚µã‚¤ã‚¯ãƒ«ç®¡ç†ï¼ˆè§£æ±ºç­–C + Phase 2æ©Ÿèƒ½ï¼‰
-        // ====================================
-        
-        // è¨˜éŒ²ã•ã‚ŒãŸprocess.htmlã‚¿ãƒ–ã‚’å–å¾—ã—ã¦é–‰ã˜ã‚‹
-        const processTabId = await getStoredProcessTabId();
-        if (processTabId) {
-            // å°‘ã—å¾…ã£ã¦ã‹ã‚‰ã‚¿ãƒ–ã‚’é–‰ã˜ã‚‹ï¼ˆé€šçŸ¥ãŒå±Šãæ™‚é–“ã‚’ç¢ºä¿ï¼‰
-            setTimeout(async () => {
-                const closed = await closeProcessTab(processTabId);
-                if (closed) {
-                    console.log(`notifyStopCompleted: Process tab ${processTabId} closed after notification`);
-                }
-                
-                // ã‚¿ãƒ–IDã‚’ã‚¯ãƒªã‚¢
-                await clearProcessTabId();
-            }, 500);
-        } else {
-            console.log('notifyStopCompleted: No specific process tab ID found, relying on general notification');
-        }
-
-        // ====================================
-        // Phase 2 ãƒ¡ã‚¤ãƒ³æ©Ÿèƒ½: å…ƒã®ã‚¿ãƒ–ã«å¾©å¸°
-        // ====================================
-        
-        const returnedTabId = await returnToOriginalTab();
-        if (returnedTabId) {
-            console.log(`notifyStopCompleted: Successfully returned to tab ${returnedTabId}`);
-        } else {
-            console.log('notifyStopCompleted: Failed to return to original tab');
-        }
-
-        console.log('notifyStopCompleted: Integrated tab management with original tab return completed successfully');
-        
-        return {
-            notificationResult,
-            processTabClosed: !!processTabId,
-            returnedTabId,
-            originalTabReturn: !!returnedTabId
-        };
-
-    } catch (error) {
-        console.error('notifyStopCompleted: Error during integrated tab management:', error);
-        
-        // ====================================
-        // ã‚¨ãƒ©ãƒ¼æ™‚ã®ãƒ•ã‚©ãƒ¼ãƒ«ãƒãƒƒã‚¯å‡¦ç†
-        // ====================================
-        
-        try {
-            // æœ€ä½Žé™ã€main.htmlã‚¿ãƒ–ã‚’ä½œæˆï¼ˆæœ€å¾Œã®æ‰‹æ®µï¼‰
-            const fallbackTab = await chrome.tabs.create({ url: 'ui/main.html' });
-            console.log(`notifyStopCompleted: Fallback main tab created: ${fallbackTab.id}`);
-            
-            return {
-                error: error.message,
-                fallbackExecuted: true,
-                fallbackTabId: fallbackTab.id
-            };
-        } catch (fallbackError) {
-            console.error('notifyStopCompleted: Fallback tab creation failed:', fallbackError);
-            
-            return {
-                error: error.message,
-                fallbackError: fallbackError.message,
-                fallbackExecuted: false
-            };
-        }
-    }
-}
-
-// æœ€æ–°ã‚¿ã‚¹ã‚¯å–å¾—ï¼ˆãƒªãƒˆãƒ©ã‚¤æ©Ÿèƒ½ä»˜ãï¼‰
 async function getLatestTodo(maxRetries = 3) {
     const db = new ExDB();
     
@@ -987,16 +788,19 @@ async function getLatestTodo(maxRetries = 3) {
     return null;
 }
 
-// Chromeæ‹¡å¼µæ©Ÿèƒ½ãƒ¡ãƒƒã‚»ãƒ¼ã‚¸ãƒªã‚¹ãƒŠãƒ¼
+// ====================================
+// Chrome拡張機能メッセージリスナー
+// ====================================
+
 chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
-    // åœæ­¢å‡¦ç†
+    // 停止処理
     if (message.action === ACTION_STOP) {
         executeStop();
         sendResponse({ success: true });
         return true;
     }
 
-    // å®Ÿè¡Œå‡¦ç†
+    // 実行処理
     if (message.action === ACTION_EXECUTE) {
         let tabId = message.tabId;
 
@@ -1005,7 +809,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 resetStopState();
                 startKeepalive();
 
-                // ãƒ‡ãƒ¼ã‚¿ãƒ™ãƒ¼ã‚¹åˆæœŸåŒ–
+                // データベース初期化
                 const db = new ExDB();
                 try {
                     await db.openDB();
@@ -1015,14 +819,14 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                     return;
                 }
 
-                // æ™‚é–“åˆ¶é™ãƒã‚§ãƒƒã‚¯
+                // 時間制限チェック
                 if (await isTimeRestricted()) {
                     chrome.tabs.update(tabId, { url: "ui/time_restricted.html" });
                     stopKeepalive();
                     return;
                 }
 
-                // ãƒ©ã‚¤ã‚»ãƒ³ã‚¹ãƒã‚§ãƒƒã‚¯
+                // ライセンスチェック
                 const licenseData = await chrome.storage.sync.get("validLicense");
                 if (!licenseData.validLicense) {
                     chrome.tabs.update(tabId, { url: "ui/error.html" });
@@ -1030,11 +834,11 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                     return;
                 }
 
-                // é™¤å¤–ãƒ‰ãƒ¡ã‚¤ãƒ³å–å¾—
+                // 除外ドメイン取得
                 let excludeData = await chrome.storage.local.get(["excludeDomain"]);
                 let excludeDomain = excludeData.excludeDomain;
 
-                // é‡è¤‡é€ä¿¡è¨­å®šå–å¾—
+                // 重複送信設定取得
                 let duplicateData = await chrome.storage.sync.get("DoNotDuplicateSend");
                 let sentUrlList = [];
 
@@ -1043,7 +847,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                     for (let i = 0; i < todos.length; i++) {
                         if (todos[i].completed) {
                             for (let j = 0; j < todos[i].description.length; j++) {
-                                if (todos[i].description[j].result === "æˆåŠŸ") {
+                                if (todos[i].description[j].result === "成功") {
                                     sentUrlList.push(todos[i].description[j].contact);
                                 }
                             }
@@ -1051,12 +855,12 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                     }
                 }
 
-                // é‡è¤‡é™¤åŽ»
+                // 重複除去
                 sentUrlList = sentUrlList.filter((value, index, self) => 
                     self.indexOf(value) === index
                 );
 
-                // æœ€æ–°Todoå–å¾—
+                // 最新Todo取得
                 let latestTodo;
                 try {
                     latestTodo = await getLatestTodo();
@@ -1081,7 +885,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 let urlList = latestTodo.description;
                 const totalUrls = urlList.length;
 
-                // ãƒãƒƒãƒå‡¦ç†
+                // バッチ処理
                 for (let batchStart = 0; batchStart < totalUrls; batchStart += BATCH_SIZE) {
                     checkStopped();
                     
@@ -1089,7 +893,7 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                     const currentBatch = Math.floor(batchStart / BATCH_SIZE) + 1;
                     const totalBatches = Math.ceil(totalUrls / BATCH_SIZE);
 
-                    // ãƒãƒƒãƒå†…URLå‡¦ç†
+                    // バッチ内URL処理
                     for (let i = batchStart; i < batchEnd; i++) {
                         checkStopped();
                         
@@ -1101,42 +905,47 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                         } else {
                             result = {
                                 url: currentUrl,
-                                result: "å¤±æ•—",
+                                result: "失敗",
                                 contact: "",
-                                reason: "URLãŒä¸æ­£ã§ã™"
+                                reason: "URLが不正です"
                             };
                         }
 
                         await updateProgress(latestTodo.id, i, result);
 
-                        // æˆåŠŸæ™‚ã¯é€ä¿¡æ¸ˆã¿ãƒªã‚¹ãƒˆã«è¿½åŠ 
-                        if (duplicateData && duplicateData.DoNotDuplicateSend && result.result === "æˆåŠŸ") {
+                        // 成功時は送信済みリストに追加
+                        if (duplicateData && duplicateData.DoNotDuplicateSend && result.result === "成功") {
                             sentUrlList.push(result.contact);
                         }
                     }
 
-                    // æœ€å¾Œã®ãƒãƒƒãƒã§ãªã„å ´åˆã¯ä¼‘æ†©
+                    // 最後のバッチでない場合は休憩
                     if (batchEnd < totalUrls) {
                         await batchBreak(currentBatch, totalBatches, tabId);
                     }
                 }
 
-                // å®Œäº†å‡¦ç†
+                // 完了処理（修正：新しいタブ作成を避け、既存タブ更新のみ）
                 await db.updateTodo(latestTodo.id, { completed: true });
-                await notifyStopCompleted();
+                
+                // 停止完了通知のみ送信（タブ操作なし）
+                await notifyAllTabsStopCompleted();
+                
+                // process.htmlタブをdone.htmlに更新（新しいタブ作成なし）
                 chrome.tabs.update(tabId, { url: "ui/done.html" });
+                console.log(`Execution completed: Updated tab ${tabId} to done.html`);
 
             } catch (error) {
                 if (error.message === ERROR_STOP_REQUESTED) {
                     try {
-                        // åœæ­¢æ™‚å¾Œå‡¦ç†
+                        // 停止時後処理
                         const db = new ExDB();
                         let latestTodo;
                         
                         try {
                             latestTodo = await getLatestTodo();
                         } catch (getError) {
-                            await notifyStopCompleted();
+                            await notifyAllTabsStopCompleted();
                             chrome.tabs.update(tabId, { url: "ui/done.html" });
                             return;
                         }
@@ -1150,9 +959,9 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                                 if (urlList[i].result === '') {
                                     await updateProgress(latestTodo.id, i, {
                                         url: urlList[i].url,
-                                        result: "åœæ­¢",
+                                        result: "停止",
                                         contact: "",
-                                        reason: "ãƒ¦ãƒ¼ã‚¶ãƒ¼ã«ã‚ˆã£ã¦åœæ­¢ã•ã‚Œã¾ã—ãŸ"
+                                        reason: "ユーザーによって停止されました"
                                     });
                                 }
                             }
@@ -1160,11 +969,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                             await db.updateTodo(latestTodo.id, { completed: true });
                         }
                     } catch (stopError) {
-                        // ã‚¨ãƒ©ãƒ¼ã‚’ç„¡è¦–
+                        // エラーを無視
                     }
 
-                    await notifyStopCompleted();
+                    // 停止完了通知のみ送信（タブ操作なし）
+                    await notifyAllTabsStopCompleted();
+                    
+                    // process.htmlタブをdone.htmlに更新（新しいタブ作成なし）
                     chrome.tabs.update(tabId, { url: "ui/done.html" });
+                    console.log(`Stop completed: Updated tab ${tabId} to done.html`);
                 } else {
                     chrome.tabs.update(tabId, { url: "ui/error.html" });
                 }
