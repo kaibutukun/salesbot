@@ -1,6 +1,7 @@
 /**
  * ストレージサービス
  * Chrome Storage API (local/sync) の統一的な操作を提供
+ * 競合解消版: sendingInProgress関連メソッドを廃止し詳細状態管理システムに統一
  */
 
 /**
@@ -396,26 +397,10 @@ export class StorageService {
         return await this.setMultiple(settings, storageType);
     }
 
-    /**
-     * 送信進行状態を取得する（BatchService用）
-     * @returns {Promise<boolean>} 送信進行中の場合はtrue
-     */
-    async getSendingProgress() {
-        return await this.get('sendingInProgress', STORAGE_TYPE.LOCAL, false);
-    }
-
-    /**
-     * 送信進行状態を設定する（BatchService用）
-     * @param {boolean} inProgress - 進行状態
-     * @returns {Promise<boolean>} 設定成功時はtrue
-     */
-    async setSendingProgress(inProgress) {
-        if (inProgress) {
-            return await this.set('sendingInProgress', true, STORAGE_TYPE.LOCAL);
-        } else {
-            return await this.remove('sendingInProgress', STORAGE_TYPE.LOCAL);
-        }
-    }
+    // ====================================
+    // 状態管理関連メソッド（統一版）
+    // 注意: sendingInProgress関連は廃止され、詳細状態管理システム(SENDING_STATE)に統一
+    // ====================================
 
     /**
      * ライセンス状態を取得する（AuthService用）

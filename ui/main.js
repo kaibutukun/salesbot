@@ -401,20 +401,52 @@ document.addEventListener('DOMContentLoaded', function() {
     }
 
     // ====================================
-    // リアルタイム状態同期システム（解決策B）
+    // 軽量化されたリアルタイム状態同期システム（解決策B最適化版）
     // ====================================
 
+    // Debounce制御変数
+    let syncDebounceTimer = null;
+    let lastSyncState = null;
+    let dashboardRefreshTimer = null;
+
     /**
-     * 状態変更時の包括的UI同期処理
+     * 軽量な状態同期処理（Debounce付き）
      * @param {string} newState - 新しい送信状態
      * @param {string|undefined} oldState - 以前の送信状態
      */
-    async function syncAllComponentsToState(newState, oldState = undefined) {
-        try {
-            console.log(`main.js: Syncing all components from ${oldState} to ${newState}`);
+    function syncComponentsToState(newState, oldState = undefined) {
+        // 同じ状態への変更は無視
+        if (lastSyncState === newState) {
+            return;
+        }
 
-            // ダッシュボードの状態同期
+        // Debounce処理で連続する状態変更を統合
+        if (syncDebounceTimer) {
+            clearTimeout(syncDebounceTimer);
+        }
+
+        syncDebounceTimer = setTimeout(() => {
+            syncComponentsImmediate(newState, oldState);
+            syncDebounceTimer = null;
+            lastSyncState = newState;
+        }, 50); // 50ms のDebounce
+    }
+
+    /**
+     * 即座に実行される軽量な状態同期処理
+     * @param {string} newState - 新しい送信状態
+     * @param {string|undefined} oldState - 以前の送信状態
+     */
+    function syncComponentsImmediate(newState, oldState) {
+        try {
+            console.log(`main.js: Lightweight sync from ${oldState} to ${newState}`);
+
+            // ====================================
+            // 必要最小限のダッシュボード更新
+            // ====================================
+            
             if (dashboard) {
+                // 状態表示のみ更新（重いリフレッシュは制限）
                 switch (newState) {
                     case SENDING_STATES.IDLE:
                         dashboard.updateSendingStatus('待機中', false);
@@ -427,38 +459,21 @@ document.addEventListener('DOMContentLoaded', function() {
                         break;
                     case SENDING_STATES.COMPLETED:
                         dashboard.updateSendingStatus('完了', false);
-                        // 完了時はダッシュボードをリフレッシュ
-                        setTimeout(() => {
-                            dashboard.refreshDashboard();
-                        }, 1000);
+                        // 完了時のみ遅延リフレッシュ（Debounce付き）
+                        scheduleDashboardRefresh();
                         break;
                 }
             }
 
-            // プロファイルマネージャーの状態同期（必要に応じて）
-            if (profileManager && typeof profileManager.onSendingStateChanged === 'function') {
-                profileManager.onSendingStateChanged(newState);
-            }
-
-            // 結果マネージャーの状態同期（必要に応じて）
-            if (resultsManager && typeof resultsManager.onSendingStateChanged === 'function') {
-                resultsManager.onSendingStateChanged(newState);
-            }
-
-            // AuthServiceの状態同期（ライセンス状態の再確認など）
-            if (authService && newState === SENDING_STATES.IDLE) {
-                // 待機状態に戻った時にライセンス状態を再確認
-                setTimeout(() => {
-                    authService.checkLicenseStatus();
-                }, 500);
-            }
-
-            // トーストメッセージによる状態変更通知（適切な場合のみ）
+            // ====================================
+            // 選択的なトースト通知（重要な遷移のみ）
+            // ====================================
+            
             if (oldState && oldState !== newState) {
                 switch (newState) {
-                    case SENDING_STATES.SENDING:
-                        if (oldState === SENDING_STATES.IDLE) {
-                            showToast('送信処理を開始しました', 'info');
+                    case SENDING_STATES.COMPLETED:
+                        if (oldState === SENDING_STATES.SENDING || oldState === SENDING_STATES.STOPPING) {
+                            showToast('送信処理が完了しました', 'success');
                         }
                         break;
                     case SENDING_STATES.STOPPING:
@@ -466,80 +481,102 @@ document.addEventListener('DOMContentLoaded', function() {
                             showToast('送信停止処理中です', 'info');
                         }
                         break;
-                    case SENDING_STATES.COMPLETED:
-                        if (oldState === SENDING_STATES.SENDING || oldState === SENDING_STATES.STOPPING) {
-                            showToast('送信処理が完了しました', 'success');
-                        }
-                        break;
-                    case SENDING_STATES.IDLE:
-                        if (oldState === SENDING_STATES.COMPLETED || oldState === SENDING_STATES.STOPPING) {
-                            showToast('待機状態に戻りました', 'info');
-                        }
-                        break;
+                    // 他の状態変更は通知を抑制してレスポンス改善
                 }
             }
 
-            console.log(`main.js: Component sync completed for state ${newState}`);
+            console.log(`main.js: Lightweight sync completed for state ${newState}`);
 
         } catch (error) {
-            console.error('main.js: Error during component state sync:', error);
+            console.error('main.js: Error during lightweight state sync:', error);
         }
     }
 
     /**
-     * リアルタイム状態同期リスナーを設定
+     * ダッシュボードリフレッシュをスケジュール（Debounce付き）
      */
-    function setupRealtimeStateSync() {
-        // Chrome storage change listener
+    function scheduleDashboardRefresh() {
+        // 既存のタイマーをクリア
+        if (dashboardRefreshTimer) {
+            clearTimeout(dashboardRefreshTimer);
+        }
+
+        // 1秒後にリフレッシュ実行（重複実行を防止）
+        dashboardRefreshTimer = setTimeout(async () => {
+            try {
+                if (dashboard) {
+                    await dashboard.refreshDashboard();
+                    console.log('main.js: Dashboard refresh completed');
+                }
+            } catch (error) {
+                console.error('main.js: Dashboard refresh failed:', error);
+            }
+            dashboardRefreshTimer = null;
+        }, 1000);
+    }
+
+    /**
+     * 軽量化されたリアルタイム状態同期リスナーを設定
+     */
+    function setupOptimizedRealtimeStateSync() {
         chrome.storage.onChanged.addListener((changes, areaName) => {
-            // 送信状態の変更を監視
-            if (areaName === 'local' && changes[STORAGE_KEYS.SENDING_STATE]) {
+            // ローカルストレージ以外は早期リターン
+            if (areaName !== 'local') {
+                // syncストレージのライセンス変更のみ処理
+                if (areaName === 'sync' && changes.validLicense && authService) {
+                    console.log('main.js: License status changed');
+                    authService.updateLicenseStatus(changes.validLicense.newValue);
+                }
+                return;
+            }
+
+            // ====================================
+            // メインの送信状態変更監視（軽量化）
+            // ====================================
+            
+            if (changes[STORAGE_KEYS.SENDING_STATE]) {
                 const oldState = changes[STORAGE_KEYS.SENDING_STATE].oldValue;
                 const newState = changes[STORAGE_KEYS.SENDING_STATE].newValue;
                 
                 console.log(`main.js: Storage state change detected: ${oldState} -> ${newState}`);
                 
-                // 新しい状態が有効な場合のみ同期
+                // 有効な状態のみ軽量同期実行
                 if (isValidSendingState(newState)) {
-                    syncAllComponentsToState(newState, oldState);
+                    syncComponentsToState(newState, oldState);
                 } else {
                     console.warn(`main.js: Invalid state received: ${newState}`);
                 }
+                return; // 他の処理をスキップ
             }
 
-            // 後方互換性のための古いフラグも監視
-            if (areaName === 'local' && changes[STORAGE_KEYS.SENDING_IN_PROGRESS]) {
-                // 詳細状態が設定されていない場合のフォールバック
-                if (!changes[STORAGE_KEYS.SENDING_STATE]) {
-                    const isInProgress = changes[STORAGE_KEYS.SENDING_IN_PROGRESS].newValue;
-                    const legacyState = isInProgress ? SENDING_STATES.SENDING : SENDING_STATES.IDLE;
-                    
-                    console.log(`main.js: Legacy state sync to ${legacyState}`);
-                    syncAllComponentsToState(legacyState);
-                }
+            // ====================================
+            // 後方互換性処理（条件を厳格化して軽量化）
+            // ====================================
+            
+            if (changes[STORAGE_KEYS.SENDING_IN_PROGRESS] && !changes[STORAGE_KEYS.SENDING_STATE]) {
+                // 詳細状態が設定されていない場合のみフォールバック
+                const isInProgress = changes[STORAGE_KEYS.SENDING_IN_PROGRESS].newValue;
+                const legacyState = isInProgress ? SENDING_STATES.SENDING : SENDING_STATES.IDLE;
+                
+                console.log(`main.js: Legacy state sync to ${legacyState}`);
+                syncComponentsToState(legacyState);
+                return;
             }
 
-            // その他の設定変更の監視（プロフィール、設定など）
-            if (areaName === 'local' && changes.optionPatterns) {
-                console.log('main.js: Profiles updated, refreshing UI components');
-                // プロフィール変更時の処理
+            // ====================================
+            // その他の設定変更（軽量化）
+            // ====================================
+            
+            // プロフィール変更時の処理（遅延実行で軽量化）
+            if (changes.optionPatterns && urlProfileManager) {
                 setTimeout(() => {
-                    if (urlProfileManager) {
-                        urlProfileManager.loadProfiles();
-                    }
+                    console.log('main.js: Profiles updated, refreshing UI components');
+                    urlProfileManager.loadProfiles();
                 }, 100);
-            }
-
-            if (areaName === 'sync' && changes.validLicense) {
-                console.log('main.js: License status changed');
-                // ライセンス状態変更時の処理
-                if (authService) {
-                    authService.updateLicenseStatus(changes.validLicense.newValue);
-                }
             }
         });
 
-        console.log('main.js: Realtime state sync system initialized');
+        console.log('main.js: Optimized realtime state sync system initialized');
     }
 
     // ====================================
@@ -602,8 +639,8 @@ document.addEventListener('DOMContentLoaded', function() {
                 console.log(`main.js: Button states restored to ${restoredState}`);
             }
 
-            // Step 5: リアルタイム状態同期システムを設定（解決策B）
-            setupRealtimeStateSync();
+            // Step 5: 軽量化されたリアルタイム状態同期システムを設定
+            setupOptimizedRealtimeStateSync();
             
             // Step 6: 初期タブ設定
             await setInitialTab();

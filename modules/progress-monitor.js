@@ -1,10 +1,16 @@
 /**
  * プログレス監視モジュール
  * バッチ処理の進捗監視とUI更新を担当
+ * 修正版: 詳細状態管理システム(SENDING_STATE)に統一、sendingInProgress廃止対応
  */
 
 import { ExDB } from '../shared/database.js';
-import { PROGRESS_UPDATE_INTERVAL } from '../shared/constants.js';
+import { 
+    PROGRESS_UPDATE_INTERVAL, 
+    SENDING_STATES, 
+    STORAGE_KEYS,
+    isValidSendingState 
+} from '../shared/constants.js';
 
 /**
  * プログレス監視クラス
@@ -122,11 +128,25 @@ export class ProgressMonitor {
             if (latestTodo.completed && !this.lastProgressState.isCompleted) {
                 this.lastProgressState.isCompleted = true;
                 
-                // ストレージから送信中フラグを削除
-                if (this.storageService) {
-                    await this.storageService.setSendingProgress(false);
-                } else {
-                    chrome.storage.local.remove('sendingInProgress');
+                // ====================================
+                // 修正: 詳細状態管理システムに統一
+                // setSendingProgress(false)を削除し、直接ストレージ操作に変更
+                // ====================================
+                
+                try {
+                    // 詳細状態管理システムを使用してIDLE状態に設定
+                    await chrome.storage.local.set({ 
+                        [STORAGE_KEYS.SENDING_STATE]: SENDING_STATES.IDLE 
+                    });
+                    console.log('Progress monitoring: Set sending state to IDLE');
+                } catch (storageError) {
+                    console.error('Failed to update sending state:', storageError);
+                    // フォールバック: 古いキーも削除を試行
+                    try {
+                        await chrome.storage.local.remove('sendingInProgress');
+                    } catch (fallbackError) {
+                        console.error('Fallback storage cleanup failed:', fallbackError);
+                    }
                 }
 
                 // 完了コールバック
@@ -214,17 +234,31 @@ export class ProgressMonitor {
     }
 
     /**
-     * 送信進行状態を確認する
+     * 送信進行状態を確認する（詳細状態管理システム対応版）
      * @returns {Promise<boolean>} 送信進行中の場合はtrue
      */
     async isSendingInProgress() {
         try {
-            if (this.storageService) {
-                return await this.storageService.getSendingProgress();
-            } else {
-                const sendingData = await chrome.storage.local.get('sendingInProgress');
-                return sendingData.sendingInProgress || false;
+            // ====================================
+            // 修正: 詳細状態管理システムを使用
+            // getSendingProgress()を削除し、SENDING_STATEを直接確認
+            // ====================================
+            
+            // 詳細状態管理システムから状態を取得
+            const data = await chrome.storage.local.get([
+                STORAGE_KEYS.SENDING_STATE,
+                'sendingInProgress' // 後方互換性のため
+            ]);
+
+            // 詳細状態が利用可能な場合
+            if (data[STORAGE_KEYS.SENDING_STATE] && isValidSendingState(data[STORAGE_KEYS.SENDING_STATE])) {
+                const currentState = data[STORAGE_KEYS.SENDING_STATE];
+                return currentState === SENDING_STATES.SENDING || currentState === SENDING_STATES.STOPPING;
             }
+
+            // 後方互換性: 古いフラグをフォールバック
+            return data.sendingInProgress || false;
+
         } catch (error) {
             console.error('Failed to check sending progress:', error);
             return false;
@@ -256,6 +290,40 @@ export class ProgressMonitor {
             lastProcessedCount: 0,
             lastTotalCount: 0
         };
+    }
+
+    /**
+     * 現在の送信状態を取得する（詳細状態管理システム対応）
+     * @returns {Promise<string>} 現在の送信状態
+     */
+    async getCurrentSendingState() {
+        try {
+            const data = await chrome.storage.local.get([STORAGE_KEYS.SENDING_STATE]);
+            const state = data[STORAGE_KEYS.SENDING_STATE];
+            
+            if (isValidSendingState(state)) {
+                return state;
+            }
+            
+            return SENDING_STATES.IDLE;
+        } catch (error) {
+            console.error('Failed to get current sending state:', error);
+            return SENDING_STATES.IDLE;
+        }
+    }
+
+    /**
+     * 進捗監視が必要かどうかを判断する
+     * @returns {Promise<boolean>} 監視が必要な場合はtrue
+     */
+    async shouldMonitorProgress() {
+        try {
+            const currentState = await this.getCurrentSendingState();
+            return currentState === SENDING_STATES.SENDING;
+        } catch (error) {
+            console.error('Failed to determine monitoring necessity:', error);
+            return false;
+        }
     }
 
     // ====================================

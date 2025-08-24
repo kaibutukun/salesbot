@@ -27,6 +27,9 @@ export class BatchService {
         // 内部状態（詳細化）
         this.currentState = SENDING_STATES.IDLE;
 
+        // 重複実行防止フラグ
+        this.isProcessing = false;
+
         // Chrome runtime listener reference
         this.stopStateListener = null;
         this.listenerAttached = false;
@@ -71,7 +74,7 @@ export class BatchService {
     }
 
     // ====================================
-    // タブライフサイクル管理（新機能）
+    // タブライフサイクル管理（元タブID記録機能）
     // ====================================
 
     /**
@@ -130,62 +133,27 @@ export class BatchService {
     }
 
     /**
-     * 現在のタブIDを取得して記録する
+     * 現在のタブIDを取得して記録する（軽量化版）
      * @returns {Promise<number|null>} 取得・記録されたタブID
      */
     async getCurrentAndStoreTabId() {
         try {
-            // chrome.tabs.getCurrent() で現在のタブIDを取得
-            const currentTab = await new Promise((resolve, reject) => {
-                chrome.tabs.getCurrent((tab) => {
-                    if (chrome.runtime.lastError) {
-                        reject(new Error(chrome.runtime.lastError.message));
-                    } else if (tab) {
-                        resolve(tab);
-                    } else {
-                        // getCurrent() が null を返す場合のフォールバック
-                        // アクティブなタブを取得
-                        chrome.tabs.query({ active: true, currentWindow: true }, (tabs) => {
-                            if (chrome.runtime.lastError) {
-                                reject(new Error(chrome.runtime.lastError.message));
-                            } else if (tabs && tabs.length > 0) {
-                                resolve(tabs[0]);
-                            } else {
-                                reject(new Error('No active tab found'));
-                            }
-                        });
-                    }
-                });
-            });
-
-            if (currentTab && currentTab.id) {
-                // 元のタブIDを記録
-                await this.storeOriginalTabId(currentTab.id);
-                console.log(`Current tab ID captured and stored: ${currentTab.id}`);
-                return currentTab.id;
-            } else {
-                console.warn('Failed to get current tab ID');
-                return null;
+            // main.html URLを持つタブを直接検索（最も確実で高速）
+            const mainUrl = chrome.runtime.getURL('ui/main.html');
+            const tabs = await chrome.tabs.query({ url: mainUrl });
+            
+            if (tabs.length > 0) {
+                const mainTab = tabs[0];
+                await this.storeOriginalTabId(mainTab.id);
+                console.log(`Main tab ID captured and stored: ${mainTab.id}`);
+                return mainTab.id;
             }
+
+            console.warn('No main.html tab found for original tab ID storage');
+            return null;
 
         } catch (error) {
             console.error('Failed to get and store current tab ID:', error);
-            
-            // フォールバック: main.html URLを持つタブを検索
-            try {
-                const mainUrl = chrome.runtime.getURL('ui/main.html');
-                const tabs = await chrome.tabs.query({ url: mainUrl });
-                
-                if (tabs.length > 0) {
-                    const fallbackTab = tabs[0];
-                    await this.storeOriginalTabId(fallbackTab.id);
-                    console.log(`Fallback: main.html tab ID stored: ${fallbackTab.id}`);
-                    return fallbackTab.id;
-                }
-            } catch (fallbackError) {
-                console.error('Fallback tab ID capture failed:', fallbackError);
-            }
-            
             return null;
         }
     }
@@ -245,48 +213,12 @@ export class BatchService {
         }
     }
 
-    /**
-     * main.htmlタブの検索と切り替え、またはタブ新規作成
-     * @returns {Promise<number>} main.htmlタブのID
-     */
-    async findOrCreateMainTab() {
-        try {
-            // 既存のmain.htmlタブを検索
-            const mainUrl = chrome.runtime.getURL('ui/main.html');
-            const tabs = await chrome.tabs.query({ url: mainUrl });
-
-            if (tabs.length > 0) {
-                // 既存のmain.htmlタブがある場合は切り替え
-                const mainTab = tabs[0];
-                await chrome.tabs.update(mainTab.id, { active: true });
-                await chrome.windows.update(mainTab.windowId, { focused: true });
-                console.log(`Switched to existing main tab: ${mainTab.id}`);
-                return mainTab.id;
-            } else {
-                // main.htmlタブがない場合は新規作成
-                const newTab = await chrome.tabs.create({ url: 'ui/main.html' });
-                console.log(`Created new main tab: ${newTab.id}`);
-                return newTab.id;
-            }
-        } catch (error) {
-            console.error('Failed to find or create main tab:', error);
-            // フォールバック：新しいタブを作成
-            try {
-                const newTab = await chrome.tabs.create({ url: 'ui/main.html' });
-                return newTab.id;
-            } catch (fallbackError) {
-                console.error('Fallback tab creation failed:', fallbackError);
-                return null;
-            }
-        }
-    }
-
     // ====================================
-    // 状態管理（詳細化）
+    // 統一状態管理システム（競合解消版）
     // ====================================
 
     /**
-     * 送信状態を変更する
+     * 送信状態を変更する（統一版：詳細状態管理のみ）
      * @param {string} newState - 新しい状態
      * @param {boolean} updateStorage - ストレージも更新するかどうか
      */
@@ -305,11 +237,16 @@ export class BatchService {
 
         if (updateStorage) {
             try {
+                // ====================================
+                // 修正：詳細状態管理システムのみに統一
+                // storage.service.jsとの競合を解消
+                // ====================================
                 await chrome.storage.local.set({ 
-                    [STORAGE_KEYS.SENDING_STATE]: newState,
-                    // 後方互換性のためのフラグも更新
-                    [STORAGE_KEYS.SENDING_IN_PROGRESS]: newState === SENDING_STATES.SENDING
+                    [STORAGE_KEYS.SENDING_STATE]: newState
+                    // [STORAGE_KEYS.SENDING_IN_PROGRESS] を削除（競合の原因）
                 });
+                
+                console.log(`State updated to: ${newState}`);
             } catch (error) {
                 console.error('Failed to update sending state in storage:', error);
                 // ストレージ更新に失敗した場合は状態を戻す
@@ -332,24 +269,19 @@ export class BatchService {
     }
 
     /**
-     * ストレージから送信状態を読み込む
+     * ストレージから送信状態を読み込む（統一版）
      * @returns {Promise<string>} 読み込まれた状態
      */
     async loadSendingStateFromStorage() {
         try {
-            const data = await chrome.storage.local.get([
-                STORAGE_KEYS.SENDING_STATE,
-                STORAGE_KEYS.SENDING_IN_PROGRESS
-            ]);
+            // ====================================
+            // 修正：詳細状態管理システムのみを使用
+            // 後方互換処理を削除してパフォーマンス改善
+            // ====================================
+            const data = await chrome.storage.local.get([STORAGE_KEYS.SENDING_STATE]);
 
-            // 新しい詳細状態があればそれを使用
             if (data[STORAGE_KEYS.SENDING_STATE] && isValidSendingState(data[STORAGE_KEYS.SENDING_STATE])) {
                 return data[STORAGE_KEYS.SENDING_STATE];
-            }
-
-            // 後方互換性：古いフラグから状態を推測
-            if (data[STORAGE_KEYS.SENDING_IN_PROGRESS]) {
-                return SENDING_STATES.SENDING;
             }
 
             return SENDING_STATES.IDLE;
@@ -451,48 +383,45 @@ export class BatchService {
     }
 
     /**
-     * 実行ボタンのイベントハンドラー（処理順序修正版 + 元タブID記録機能追加）
+     * 実行ボタンのイベントハンドラー（パフォーマンス改善版）
      */
     async executeButtonHandler() {
+        // ====================================
+        // 重複実行防止（即座に実行）
+        // ====================================
+        if (this.isProcessing) {
+            console.log('Execute button handler already processing, ignoring click');
+            return;
+        }
+
+        if (this.currentState !== SENDING_STATES.IDLE && this.currentState !== SENDING_STATES.COMPLETED) {
+            this.showToast('送信処理が既に実行中です', 'warning');
+            return;
+        }
+
+        // 処理開始フラグを設定（重複クリック防止）
+        this.isProcessing = true;
+
         try {
-            // 現在の状態をチェック
-            if (this.currentState !== SENDING_STATES.IDLE && this.currentState !== SENDING_STATES.COMPLETED) {
-                this.showToast('送信処理が既に実行中です', 'warning');
+            // ====================================
+            // 高速化：必要最小限の事前チェック
+            // ====================================
+
+            // ライセンス確認（高速）
+            let licenseValid = false;
+            if (this.authService) {
+                licenseValid = await this.authService.isLicenseValid();
+            } else {
+                const licenseData = await chrome.storage.sync.get('validLicense');
+                licenseValid = licenseData.validLicense;
+            }
+
+            if (!licenseValid) {
+                this.showToast('有効なライセンスが必要です', 'warning');
                 return;
             }
 
-            // ====================================
-            // Phase 1: 元タブID記録機能
-            // ====================================
-            
-            console.log('Capturing and storing original tab ID before sending...');
-            const originalTabId = await this.getCurrentAndStoreTabId();
-            
-            if (originalTabId) {
-                this.showToast('送信準備完了：元のタブを記録しました', 'info');
-            } else {
-                // 元タブIDの取得に失敗しても処理を続行（警告のみ）
-                console.warn('Failed to capture original tab ID, but continuing with execution');
-                this.showToast('警告：元のタブの記録に失敗しましたが、処理を続行します', 'warning');
-            }
-
-            // ライセンス確認
-            if (this.authService) {
-                const isLicenseValid = await this.authService.isLicenseValid();
-                if (!isLicenseValid) {
-                    this.showToast('有効なライセンスが必要です', 'warning');
-                    return;
-                }
-            } else {
-                // fallback: 直接確認
-                const licenseData = await chrome.storage.sync.get('validLicense');
-                if (!licenseData.validLicense) {
-                    this.showToast('有効なライセンスが必要です', 'warning');
-                    return;
-                }
-            }
-
-            // データベースの初期化と確認
+            // データベースの初期化確認（軽量）
             const db = new ExDB();
             try {
                 await db.openDB();
@@ -502,37 +431,33 @@ export class BatchService {
             }
 
             // ====================================
-            // 修正された処理順序：自動保存 → バリデーション
+            // URL検証（必要に応じて自動保存）
             // ====================================
 
             let urlsToProcess = [];
             
             if (this.urlManager) {
-                // Step 1: テキストエリアから現在のURLリストを取得
                 urlsToProcess = this.urlManager.getCurrentUrls();
                 
-                // Step 2: URLがテキストエリアに入力されていれば自動保存
                 if (urlsToProcess.length > 0) {
                     console.log(`Auto-saving ${urlsToProcess.length} URLs before validation`);
                     await this.urlManager.saveUrlList();
-                    // 保存完了を確実に待機
-                    await new Promise(resolve => setTimeout(resolve, 800));
+                    await new Promise(resolve => setTimeout(resolve, 500)); // 短縮
                 }
                 
-                // Step 3: 保存後にバリデーション実行
                 const urlValidation = await this.urlManager.validateUrlList();
                 if (!urlValidation.isValid) {
                     this.showToast(urlValidation.message, 'warning');
                     return;
                 }
-                
-                console.log('URL validation passed:', urlValidation.message);
             }
 
-            // 最新のTodoを取得
+            // ====================================
+            // Todo処理（軽量化）
+            // ====================================
+
             let latestTodo = await db.getLatestTodo();
 
-            // タスクが存在しない場合は手動で作成（フォールバック）
             if (!latestTodo) {
                 if (urlsToProcess.length === 0) {
                     this.showToast('URLリストが設定されていません', 'warning');
@@ -540,7 +465,7 @@ export class BatchService {
                 }
                 
                 const now = new Date();
-                const title = `手動作成 ${now.toLocaleString('ja-JP')}`;
+                const title = now.toLocaleString('ja-JP');
                 const description = urlsToProcess.map(url => ({
                     url: url.trim(),
                     result: '',
@@ -565,11 +490,24 @@ export class BatchService {
                 }
             }
 
+            // ====================================
+            // ユーザー確認（ここでやっと confirm）
+            // ====================================
             if (!confirm(`${latestTodo.description.length}件のURLに対して送信を開始しますか？`)) {
                 return;
             }
 
-            // 新しいタスクを作成（完了済みの場合）
+            // ====================================
+            // confirm後に元タブID記録（軽量版）
+            // ====================================
+            const originalTabId = await this.getCurrentAndStoreTabId();
+            if (originalTabId) {
+                console.log(`Original tab ID recorded: ${originalTabId}`);
+            }
+
+            // ====================================
+            // 新タスク作成（完了済みの場合）
+            // ====================================
             if (latestTodo.completed) {
                 const now = new Date();
                 const title = now.toLocaleString('ja-JP');
@@ -581,10 +519,12 @@ export class BatchService {
                 }));
                 
                 await db.addTodo(title, newDescription);
-                
-                // 新しいタスクの書き込み完了を待機
-                await new Promise(resolve => setTimeout(resolve, 1000));
+                await new Promise(resolve => setTimeout(resolve, 500)); // 短縮
             }
+
+            // ====================================
+            // 送信開始
+            // ====================================
 
             // 状態を送信中に変更
             await this.setSendingState(SENDING_STATES.SENDING);
@@ -594,11 +534,11 @@ export class BatchService {
             // 処理用タブを作成
             const tab = await chrome.tabs.create({ url: 'ui/process.html' });
             
-            // タブIDをストレージに記録（タブライフサイクル管理）
+            // タブIDをストレージに記録
             await this.storeProcessTabId(tab.id);
             
-            // 確実にタブが作成されるまで待機
-            await new Promise(resolve => setTimeout(resolve, 1500));
+            // タブ作成待機時間短縮
+            await new Promise(resolve => setTimeout(resolve, 1000));
             
             // バックグラウンドスクリプトに実行メッセージを送信
             chrome.runtime.sendMessage({ 
@@ -611,9 +551,13 @@ export class BatchService {
             
         } catch (error) {
             this.showToast('送信開始に失敗しました: ' + error.message, 'error');
+            console.error('Execute button handler error:', error);
             
             // エラー時は状態をリセット
             await this.setSendingState(SENDING_STATES.IDLE);
+        } finally {
+            // 処理完了フラグをクリア
+            this.isProcessing = false;
         }
     }
 
@@ -650,7 +594,7 @@ export class BatchService {
     }
 
     /**
-     * 送信状態を確認して復元する（詳細版）
+     * 送信状態を確認して復元する（統一版）
      */
     async checkAndRestoreSendingState() {
         try {
@@ -692,27 +636,22 @@ export class BatchService {
             // ストレージの状態に応じて復元
             switch (storedState) {
                 case SENDING_STATES.SENDING:
-                    // 送信中状態を復元
                     await this.setSendingState(SENDING_STATES.SENDING, false);
                     break;
 
                 case SENDING_STATES.STOPPING:
-                    // 停止処理中状態を復元
                     await this.setSendingState(SENDING_STATES.STOPPING, false);
                     break;
 
                 case SENDING_STATES.COMPLETED:
                     if (hasProcessed) {
-                        // 一部処理済みで完了状態の場合は、実際は停止された可能性
                         await this.setSendingState(SENDING_STATES.COMPLETED, false);
                     } else {
-                        // 未処理の場合は待機状態に戻す
                         await this.setSendingState(SENDING_STATES.IDLE);
                     }
                     break;
 
                 default:
-                    // 不明な状態の場合は待機状態に設定
                     await this.setSendingState(SENDING_STATES.IDLE);
                     break;
             }
@@ -802,6 +741,7 @@ export class BatchService {
     getExecutionState() {
         return {
             currentState: this.currentState,
+            isProcessing: this.isProcessing,
             isProgressMonitoring: this.progressMonitor ? this.progressMonitor.getMonitoringState().isMonitoring : false
         };
     }
@@ -864,6 +804,9 @@ export class BatchService {
         try {
             // 進捗監視を停止
             this.stopProgressMonitoring();
+
+            // 処理中フラグをクリア
+            this.isProcessing = false;
 
             // 状態を待機中に設定
             await this.setSendingState(SENDING_STATES.IDLE);

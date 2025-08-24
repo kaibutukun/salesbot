@@ -1,7 +1,7 @@
 /**
  * URL管理モジュール
  * URLリストの読み込み、保存、クリア機能と実行ボタンの状態管理を担当
- * 基本機能 + リアルタイム状態同期システム統合版（バリデーション修正）
+ * パフォーマンス最適化版: 状態同期重複処理解消、軽量化リスナー
  */
 
 import { ExDB } from '../shared/database.js';
@@ -20,7 +20,22 @@ export class UrlManager {
         this.stopHandler = null;
         this.elements = this.initializeElements();
         this.setupEventListeners();
-        this.setupRealtimeStateSync(); // リアルタイム状態同期を設定
+        
+        // ====================================
+        // パフォーマンス最適化用の状態管理
+        // ====================================
+        
+        // 軽量化された状態同期システム
+        this.setupOptimizedStateSync();
+        
+        // 重複処理防止
+        this.lastSyncedState = null;
+        this.syncDebounceTimer = null;
+        this.syncDebounceDelay = 50; // 50msのDebounce
+        
+        // リスナー管理
+        this.storageListener = null;
+        this.isListenerRegistered = false;
     }
 
     /**
@@ -329,49 +344,100 @@ export class UrlManager {
     }
 
     // ====================================
-    // リアルタイム状態同期システム（解決策B統合）
+    // 最適化された状態同期システム（競合解消版）
     // ====================================
 
     /**
-     * リアルタイム状態同期を設定
+     * 軽量化されたリアルタイム状態同期を設定
+     * main.jsとの競合を避ける最適化版
      */
-    setupRealtimeStateSync() {
-        if (chrome && chrome.storage && chrome.storage.onChanged) {
-            chrome.storage.onChanged.addListener((changes, areaName) => {
-                // ローカルストレージの送信状態変更を監視
-                if (areaName === 'local' && changes[STORAGE_KEYS.SENDING_STATE]) {
-                    const oldState = changes[STORAGE_KEYS.SENDING_STATE].oldValue;
-                    const newState = changes[STORAGE_KEYS.SENDING_STATE].newValue;
-                    
-                    console.log(`UrlManager: Sending state changed from ${oldState} to ${newState}`);
-                    
-                    // 新しい状態が有効な場合のみ同期
-                    if (isValidSendingState(newState)) {
-                        this.syncButtonStatesFromStorage(newState);
-                    }
-                }
-
-                // 後方互換性のための古いフラグも監視
-                if (areaName === 'local' && changes[STORAGE_KEYS.SENDING_IN_PROGRESS]) {
-                    const isInProgress = changes[STORAGE_KEYS.SENDING_IN_PROGRESS].newValue;
-                    
-                    // 詳細状態が設定されていない場合のフォールバック
-                    if (!changes[STORAGE_KEYS.SENDING_STATE]) {
-                        const legacyState = isInProgress ? SENDING_STATES.SENDING : SENDING_STATES.IDLE;
-                        console.log(`UrlManager: Legacy state sync to ${legacyState}`);
-                        this.syncButtonStatesFromStorage(legacyState);
-                    }
-                }
-            });
-            
-            console.log('UrlManager: Realtime state sync listener registered');
-        } else {
+    setupOptimizedStateSync() {
+        // Chrome Storage APIが利用可能かチェック
+        if (!chrome || !chrome.storage || !chrome.storage.onChanged) {
             console.warn('UrlManager: Chrome storage API not available for state sync');
+            return;
         }
+
+        // ====================================
+        // 軽量化されたリスナー（競合回避機能付き）
+        // ====================================
+        
+        this.storageListener = (changes, areaName) => {
+            // 早期リターン: ローカルストレージ以外は無視
+            if (areaName !== 'local') {
+                return;
+            }
+
+            // ====================================
+            // main.jsとの競合回避: 最小限の処理のみ
+            // ====================================
+            
+            // 詳細状態変更の監視（最優先）
+            if (changes[STORAGE_KEYS.SENDING_STATE]) {
+                const newState = changes[STORAGE_KEYS.SENDING_STATE].newValue;
+                
+                // 有効な状態のみDebounce付きで同期
+                if (isValidSendingState(newState)) {
+                    this.debouncedButtonSync(newState);
+                }
+                return; // 他の処理をスキップして競合を回避
+            }
+
+            // ====================================
+            // 後方互換性処理（条件を厳格化して軽量化）
+            // ====================================
+            
+            // 詳細状態が存在しない場合のみフォールバック
+            if (changes[STORAGE_KEYS.SENDING_IN_PROGRESS] && !changes[STORAGE_KEYS.SENDING_STATE]) {
+                const isInProgress = changes[STORAGE_KEYS.SENDING_IN_PROGRESS].newValue;
+                
+                // 最小限の処理でレガシー状態を同期
+                if (typeof isInProgress === 'boolean') {
+                    const legacyState = isInProgress ? SENDING_STATES.SENDING : SENDING_STATES.IDLE;
+                    console.log(`UrlManager: Minimal legacy sync to ${legacyState}`);
+                    this.debouncedButtonSync(legacyState);
+                }
+                return;
+            }
+        };
+
+        // リスナーを登録
+        chrome.storage.onChanged.addListener(this.storageListener);
+        this.isListenerRegistered = true;
+        
+        console.log('UrlManager: Optimized state sync listener registered (lightweight mode)');
     }
 
     /**
-     * ストレージの状態に基づいてボタン状態を同期
+     * Debounce付きボタン状態同期（重複処理防止）
+     * @param {string} newState - 新しい送信状態
+     */
+    debouncedButtonSync(newState) {
+        // 同じ状態への変更は無視（重複処理防止）
+        if (this.lastSyncedState === newState) {
+            return;
+        }
+
+        // 既存のタイマーをクリア
+        if (this.syncDebounceTimer) {
+            clearTimeout(this.syncDebounceTimer);
+        }
+
+        // Debounce処理で連続した状態変更を統合
+        this.syncDebounceTimer = setTimeout(() => {
+            try {
+                this.syncButtonStatesFromStorage(newState);
+                this.lastSyncedState = newState;
+                console.log(`UrlManager: Debounced button sync completed for ${newState}`);
+            } catch (error) {
+                console.error('UrlManager: Debounced button sync failed:', error);
+            }
+            this.syncDebounceTimer = null;
+        }, this.syncDebounceDelay);
+    }
+
+    /**
+     * ストレージの状態に基づいてボタン状態を同期（軽量版）
      * @param {string} state - 同期する送信状態
      */
     syncButtonStatesFromStorage(state) {
@@ -400,10 +466,44 @@ export class UrlManager {
                     break;
             }
             
-            console.log(`UrlManager: Button states synced to ${state}`);
-            
         } catch (error) {
-            console.error('UrlManager: Error during button state sync:', error);
+            console.error('UrlManager: Error during lightweight button state sync:', error);
+        }
+    }
+
+    // ====================================
+    // 外部からの直接状態同期（main.js優先制御）
+    // ====================================
+
+    /**
+     * 外部から直接ボタン状態を同期（main.jsからの呼び出し用）
+     * chrome.storage.onChangedを経由しない直接同期
+     * @param {string} state - 設定する送信状態
+     */
+    syncButtonStateDirect(state) {
+        if (isValidSendingState(state)) {
+            this.syncButtonStatesFromStorage(state);
+            this.lastSyncedState = state;
+            console.log(`UrlManager: Direct button sync to ${state}`);
+        }
+    }
+
+    /**
+     * 状態同期の優先制御を設定
+     * main.jsからの制御を優先する場合に使用
+     * @param {boolean} prioritizeExternal - 外部制御を優先するかどうか
+     */
+    setPrioritizeExternalControl(prioritizeExternal) {
+        if (prioritizeExternal && this.isListenerRegistered) {
+            // 外部制御優先時はリスナーを無効化
+            chrome.storage.onChanged.removeListener(this.storageListener);
+            this.isListenerRegistered = false;
+            console.log('UrlManager: Storage listener disabled for external control priority');
+        } else if (!prioritizeExternal && !this.isListenerRegistered && this.storageListener) {
+            // 内部制御復帰時はリスナーを再有効化
+            chrome.storage.onChanged.addListener(this.storageListener);
+            this.isListenerRegistered = true;
+            console.log('UrlManager: Storage listener re-enabled');
         }
     }
 
@@ -535,6 +635,7 @@ export class UrlManager {
 
             // 状態に応じてボタンを設定
             this.syncButtonStatesFromStorage(currentState);
+            this.lastSyncedState = currentState;
 
             console.log(`UrlManager: Button state restored to ${currentState}`);
             return currentState;
@@ -575,19 +676,37 @@ export class UrlManager {
     }
 
     /**
-     * URL管理クラスの破棄
+     * URL管理クラスの破棄（リスナークリーンアップ付き）
      */
     destroy() {
+        // Debounceタイマーをクリア
+        if (this.syncDebounceTimer) {
+            clearTimeout(this.syncDebounceTimer);
+            this.syncDebounceTimer = null;
+        }
+
+        // ストレージリスナーを削除
+        if (this.storageListener && this.isListenerRegistered) {
+            try {
+                chrome.storage.onChanged.removeListener(this.storageListener);
+                console.log('UrlManager: Storage listener removed during cleanup');
+            } catch (error) {
+                console.warn('UrlManager: Failed to remove storage listener:', error);
+            }
+        }
+
         // イベントハンドラーを削除
         this.removeEventHandlers();
         
-        // chrome.storage.onChanged リスナーは自動的にクリーンアップされる
+        // 参照をクリア
         this.elements = null;
         this.executeHandler = null;
         this.stopHandler = null;
         this.showToastFunction = null;
         this.getElementFunction = null;
         this.refreshDashboardFunction = null;
+        this.storageListener = null;
+        this.isListenerRegistered = false;
     }
 }
 
