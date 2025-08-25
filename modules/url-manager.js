@@ -21,11 +21,7 @@ export class UrlManager {
         this.elements = this.initializeElements();
         this.setupEventListeners();
         
-        // ====================================
         // パフォーマンス最適化用の状態管理
-        // ====================================
-        
-        // 軽量化された状態同期システム
         this.setupOptimizedStateSync();
         
         // 重複処理防止
@@ -38,9 +34,10 @@ export class UrlManager {
         this.isListenerRegistered = false;
     }
 
-    /**
-     * DOM要素を初期化
-     */
+    // ====================================
+    // DOM要素を初期化
+    // ====================================
+
     initializeElements() {
         return {
             urlListTextarea: this.getElement('urlListTextarea'),
@@ -53,10 +50,7 @@ export class UrlManager {
     }
 
     getElement(id) {
-        if (this.getElementFunction) {
-            return this.getElementFunction(id);
-        }
-        return document.getElementById(id);
+        return this.getElementFunction ? this.getElementFunction(id) : document.getElementById(id);
     }
 
     showToast(message, type = 'info') {
@@ -72,12 +66,9 @@ export class UrlManager {
     }
 
     // ====================================
-    // 基本URL管理機能（元の実装から復元）
+    // 基本URL管理機能
     // ====================================
 
-    /**
-     * 最新の未完了Todoを削除
-     */
     async deleteLatestIncompleteTodo() {
         const db = new ExDB();
         const latestTodo = await db.getLatestTodo();
@@ -89,31 +80,20 @@ export class UrlManager {
         return false;
     }
 
-    /**
-     * イベントリスナーを設定
-     */
     setupEventListeners() {
-        // URL保存ボタン
         if (this.elements.saveUrlListButton) {
             this.elements.saveUrlListButton.addEventListener('click', () => this.saveUrlList());
         }
         
-        // URLクリアボタン
         if (this.elements.clearUrlListButton) {
             this.elements.clearUrlListButton.addEventListener('click', () => this.clearUrlList());
         }
 
-        // URLリストのリアルタイム更新（URL数表示）
         if (this.elements.urlListTextarea) {
-            this.elements.urlListTextarea.addEventListener('input', () => {
-                this.updateUrlCount();
-            });
+            this.elements.urlListTextarea.addEventListener('input', () => this.updateUrlCount());
         }
     }
 
-    /**
-     * URLリストをデータベースから読み込み
-     */
     async loadUrlList() {
         if (!this.elements.urlListTextarea) return;
 
@@ -126,16 +106,13 @@ export class UrlManager {
                 const urls = latestTodo.description.map(item => item.url).join('\n');
                 this.elements.urlListTextarea.value = urls;
             } else {
-                // 空の状態で初期化（空白文字問題の修正）
                 this.elements.urlListTextarea.value = '';
             }
             
-            // URL数を更新
             this.updateUrlCount();
             
         } catch (error) {
             console.error('URL読み込みエラー:', error);
-            // エラー時は空で初期化
             if (this.elements.urlListTextarea) {
                 this.elements.urlListTextarea.value = '';
             }
@@ -143,7 +120,7 @@ export class UrlManager {
     }
 
     /**
-     * URLリストを保存
+     * URLリストを保存（ポップアップメッセージ削除）
      */
     async saveUrlList() {
         if (!this.elements.urlListTextarea) return;
@@ -156,7 +133,6 @@ export class UrlManager {
                 return;
             }
 
-            // 重複排除と基本的な正規化
             const normalizedUrls = this.normalizeAndValidateUrls(urls);
             
             if (normalizedUrls.length === 0) {
@@ -164,10 +140,8 @@ export class UrlManager {
                 return;
             }
 
-            // 既存の未完了タスクを削除
             await this.deleteLatestIncompleteTodo();
 
-            // 新しいタスクを作成
             const db = new ExDB();
             await db.openDB();
             const date = new Date();
@@ -180,7 +154,7 @@ export class UrlManager {
             }));
 
             await db.addTodo(title, description);
-            this.showToast(`URLリストを保存しました (${normalizedUrls.length}件)`, 'success');
+            // 削除: this.showToast(`URLリストを保存しました (${normalizedUrls.length}件)`, 'success');
             await this.refreshDashboard();
             
         } catch (error) {
@@ -189,9 +163,6 @@ export class UrlManager {
         }
     }
 
-    /**
-     * URLリストをクリア
-     */
     async clearUrlList() {
         if (!this.elements.urlListTextarea) return;
 
@@ -200,15 +171,9 @@ export class UrlManager {
                 return;
             }
 
-            // 未完了タスクを削除
             await this.deleteLatestIncompleteTodo();
-            
-            // テキストエリアをクリア
             this.elements.urlListTextarea.value = '';
-            
-            // URL数を更新
             this.updateUrlCount();
-            
             await this.refreshDashboard();
             this.showToast('URLリストをクリアしました', 'info');
             
@@ -218,10 +183,10 @@ export class UrlManager {
         }
     }
 
-    /**
-     * 現在のURLリストを取得
-     * @returns {Array<string>} URLの配列
-     */
+    // ====================================
+    // URL処理
+    // ====================================
+
     getCurrentUrls() {
         if (!this.elements.urlListTextarea) return [];
         
@@ -233,17 +198,10 @@ export class UrlManager {
             .filter(line => line.length > 0);
     }
 
-    /**
-     * URLリストが空かどうかをチェック
-     * @returns {boolean} 空の場合true
-     */
     isUrlListEmpty() {
         return this.getCurrentUrls().length === 0;
     }
 
-    /**
-     * URL数を更新表示
-     */
     updateUrlCount() {
         const urls = this.getCurrentUrls();
         if (this.elements.urlCount) {
@@ -251,11 +209,6 @@ export class UrlManager {
         }
     }
 
-    /**
-     * URLの正規化とバリデーション
-     * @param {Array<string>} urls - URL配列
-     * @returns {Array<string>} 正規化されたURL配列
-     */
     normalizeAndValidateUrls(urls) {
         const seen = new Set();
         const normalized = [];
@@ -272,11 +225,6 @@ export class UrlManager {
         return normalized;
     }
 
-    /**
-     * URL形式の妥当性チェック
-     * @param {string} url - チェックするURL
-     * @returns {boolean} 有効なURLの場合true
-     */
     isValidUrl(url) {
         try {
             const urlObj = new URL(url);
@@ -286,13 +234,8 @@ export class UrlManager {
         }
     }
 
-    /**
-     * URLリストのバリデーション（テキストエリア優先版）
-     * @returns {Object} バリデーション結果
-     */
     async validateUrlList() {
         try {
-            // テキストエリアの内容を最優先でチェック
             if (this.elements.urlListTextarea) {
                 const urls = this.getCurrentUrls();
                 if (urls.length === 0) {
@@ -302,12 +245,11 @@ export class UrlManager {
                     };
                 }
                 
-                // テキストエリアに有効なURLがあれば、データベースの状態に関係なく有効とする
                 const normalizedUrls = this.normalizeAndValidateUrls(urls);
                 if (normalizedUrls.length > 0) {
                     return {
                         isValid: true,
-                        message: `${normalizedUrls.length}件のURLが入力されています（送信前に自動保存されます）`
+                        message: `${normalizedUrls.length}件のURLが準備されています（送信前に自動保存されます）`
                     };
                 } else {
                     return {
@@ -317,7 +259,6 @@ export class UrlManager {
                 }
             }
 
-            // テキストエリアがない場合のフォールバック：データベースをチェック
             const db = new ExDB();
             await db.openDB();
             const latestTodo = await db.getLatestTodo();
@@ -335,7 +276,7 @@ export class UrlManager {
             };
             
         } catch (error) {
-            console.error('URL validation error:', error);
+            console.error('URLリスト検証エラー:', error);
             return {
                 isValid: false,
                 message: 'URLリストの検証に失敗しました'
@@ -344,176 +285,90 @@ export class UrlManager {
     }
 
     // ====================================
-    // 最適化された状態同期システム（競合解消版）
+    // 最適化された状態同期システム
     // ====================================
 
-    /**
-     * 軽量化されたリアルタイム状態同期を設定
-     * main.jsとの競合を避ける最適化版
-     */
     setupOptimizedStateSync() {
-        // Chrome Storage APIが利用可能かチェック
         if (!chrome || !chrome.storage || !chrome.storage.onChanged) {
-            console.warn('UrlManager: Chrome storage API not available for state sync');
+            console.warn('UrlManager: Chrome storage APIが利用できません');
             return;
         }
-
-        // ====================================
-        // 軽量化されたリスナー（競合回避機能付き）
-        // ====================================
         
         this.storageListener = (changes, areaName) => {
-            // 早期リターン: ローカルストレージ以外は無視
-            if (areaName !== 'local') {
-                return;
-            }
+            if (areaName !== 'local') return;
 
-            // ====================================
-            // main.jsとの競合回避: 最小限の処理のみ
-            // ====================================
-            
-            // 詳細状態変更の監視（最優先）
             if (changes[STORAGE_KEYS.SENDING_STATE]) {
                 const newState = changes[STORAGE_KEYS.SENDING_STATE].newValue;
                 
-                // 有効な状態のみDebounce付きで同期
                 if (isValidSendingState(newState)) {
                     this.debouncedButtonSync(newState);
                 }
-                return; // 他の処理をスキップして競合を回避
+                return;
             }
 
-            // ====================================
-            // 後方互換性処理（条件を厳格化して軽量化）
-            // ====================================
-            
-            // 詳細状態が存在しない場合のみフォールバック
+            // 後方互換性対応
             if (changes[STORAGE_KEYS.SENDING_IN_PROGRESS] && !changes[STORAGE_KEYS.SENDING_STATE]) {
                 const isInProgress = changes[STORAGE_KEYS.SENDING_IN_PROGRESS].newValue;
                 
-                // 最小限の処理でレガシー状態を同期
                 if (typeof isInProgress === 'boolean') {
                     const legacyState = isInProgress ? SENDING_STATES.SENDING : SENDING_STATES.IDLE;
-                    console.log(`UrlManager: Minimal legacy sync to ${legacyState}`);
                     this.debouncedButtonSync(legacyState);
                 }
                 return;
             }
         };
 
-        // リスナーを登録
         chrome.storage.onChanged.addListener(this.storageListener);
         this.isListenerRegistered = true;
         
-        console.log('UrlManager: Optimized state sync listener registered (lightweight mode)');
+        console.log('UrlManager: 状態同期リスナーを登録しました');
     }
 
-    /**
-     * Debounce付きボタン状態同期（重複処理防止）
-     * @param {string} newState - 新しい送信状態
-     */
     debouncedButtonSync(newState) {
-        // 同じ状態への変更は無視（重複処理防止）
-        if (this.lastSyncedState === newState) {
-            return;
-        }
+        if (this.lastSyncedState === newState) return;
 
-        // 既存のタイマーをクリア
         if (this.syncDebounceTimer) {
             clearTimeout(this.syncDebounceTimer);
         }
 
-        // Debounce処理で連続した状態変更を統合
         this.syncDebounceTimer = setTimeout(() => {
             try {
                 this.syncButtonStatesFromStorage(newState);
                 this.lastSyncedState = newState;
-                console.log(`UrlManager: Debounced button sync completed for ${newState}`);
             } catch (error) {
-                console.error('UrlManager: Debounced button sync failed:', error);
+                console.error('UrlManager: ボタン同期に失敗しました:', error);
             }
             this.syncDebounceTimer = null;
         }, this.syncDebounceDelay);
     }
 
-    /**
-     * ストレージの状態に基づいてボタン状態を同期（軽量版）
-     * @param {string} state - 同期する送信状態
-     */
     syncButtonStatesFromStorage(state) {
         try {
             switch (state) {
                 case SENDING_STATES.IDLE:
-                    this.setButtonsToExecuteState(this.executeHandler);
-                    break;
-
-                case SENDING_STATES.SENDING:
-                    this.setButtonsToSendingState(this.stopHandler);
-                    break;
-
-                case SENDING_STATES.STOPPING:
-                    this.setButtonsToStoppingState();
-                    break;
-
                 case SENDING_STATES.COMPLETED:
                     this.setButtonsToExecuteState(this.executeHandler);
                     break;
-
+                case SENDING_STATES.SENDING:
+                    this.setButtonsToSendingState(this.stopHandler);
+                    break;
+                case SENDING_STATES.STOPPING:
+                    this.setButtonsToStoppingState();
+                    break;
                 default:
-                    console.warn(`UrlManager: Unknown state for sync: ${state}`);
-                    // 不明な状態の場合は安全に待機状態に設定
+                    console.warn(`UrlManager: 未知の状態です: ${state}`);
                     this.setButtonsToExecuteState(this.executeHandler);
                     break;
             }
-            
         } catch (error) {
-            console.error('UrlManager: Error during lightweight button state sync:', error);
+            console.error('UrlManager: ボタン状態同期エラー:', error);
         }
     }
 
     // ====================================
-    // 外部からの直接状態同期（main.js優先制御）
+    // ボタン状態管理
     // ====================================
 
-    /**
-     * 外部から直接ボタン状態を同期（main.jsからの呼び出し用）
-     * chrome.storage.onChangedを経由しない直接同期
-     * @param {string} state - 設定する送信状態
-     */
-    syncButtonStateDirect(state) {
-        if (isValidSendingState(state)) {
-            this.syncButtonStatesFromStorage(state);
-            this.lastSyncedState = state;
-            console.log(`UrlManager: Direct button sync to ${state}`);
-        }
-    }
-
-    /**
-     * 状態同期の優先制御を設定
-     * main.jsからの制御を優先する場合に使用
-     * @param {boolean} prioritizeExternal - 外部制御を優先するかどうか
-     */
-    setPrioritizeExternalControl(prioritizeExternal) {
-        if (prioritizeExternal && this.isListenerRegistered) {
-            // 外部制御優先時はリスナーを無効化
-            chrome.storage.onChanged.removeListener(this.storageListener);
-            this.isListenerRegistered = false;
-            console.log('UrlManager: Storage listener disabled for external control priority');
-        } else if (!prioritizeExternal && !this.isListenerRegistered && this.storageListener) {
-            // 内部制御復帰時はリスナーを再有効化
-            chrome.storage.onChanged.addListener(this.storageListener);
-            this.isListenerRegistered = true;
-            console.log('UrlManager: Storage listener re-enabled');
-        }
-    }
-
-    // ====================================
-    // ボタン状態管理（色固定版 + 基本機能復元）
-    // ====================================
-
-    /**
-     * イベントハンドラーを安全に削除
-     */
     removeEventHandlers() {
         if (this.executeHandler && this.elements.executeFromUrlTabButton) {
             this.elements.executeFromUrlTabButton.removeEventListener('click', this.executeHandler);
@@ -523,27 +378,20 @@ export class UrlManager {
         }
     }
 
-    /**
-     * 送信開始状態：開始ボタン有効、停止ボタン無効
-     * @param {Function} executeHandler - 送信開始ハンドラー
-     */
     setButtonsToExecuteState(executeHandler) {
-        this.executeHandler = executeHandler; // ハンドラーを保存
+        this.executeHandler = executeHandler;
         this.removeEventHandlers();
 
-        // 送信開始ボタン：有効（常に青色）
         if (this.elements.executeFromUrlTabButton) {
             this.elements.executeFromUrlTabButton.textContent = '送信開始';
             this.elements.executeFromUrlTabButton.className = 'primary-button';
             this.elements.executeFromUrlTabButton.disabled = false;
             
-            // イベントハンドラーを設定
             if (executeHandler) {
                 this.elements.executeFromUrlTabButton.addEventListener('click', executeHandler);
             }
         }
 
-        // 送信停止ボタン：無効（常に赤色）
         if (this.elements.stopFromUrlTabButton) {
             this.elements.stopFromUrlTabButton.textContent = '送信停止';
             this.elements.stopFromUrlTabButton.className = 'danger-button';
@@ -551,48 +399,36 @@ export class UrlManager {
         }
     }
 
-    /**
-     * 送信中状態：開始ボタン無効、停止ボタン有効
-     * @param {Function} stopHandler - 送信停止ハンドラー
-     */
     setButtonsToSendingState(stopHandler) {
-        this.stopHandler = stopHandler; // ハンドラーを保存
+        this.stopHandler = stopHandler;
         this.removeEventHandlers();
 
-        // 送信開始ボタン：無効（常に青色）
         if (this.elements.executeFromUrlTabButton) {
             this.elements.executeFromUrlTabButton.textContent = '送信開始';
             this.elements.executeFromUrlTabButton.className = 'primary-button';
             this.elements.executeFromUrlTabButton.disabled = true;
         }
 
-        // 送信停止ボタン：有効（常に赤色）
         if (this.elements.stopFromUrlTabButton) {
             this.elements.stopFromUrlTabButton.textContent = '送信停止';
             this.elements.stopFromUrlTabButton.className = 'danger-button';
             this.elements.stopFromUrlTabButton.disabled = false;
             
-            // イベントハンドラーを設定
             if (stopHandler) {
                 this.elements.stopFromUrlTabButton.addEventListener('click', stopHandler);
             }
         }
     }
 
-    /**
-     * 停止処理中状態：両方のボタンを無効
-     */
     setButtonsToStoppingState() {
         this.removeEventHandlers();
 
-        // 送信開始ボタン：無効（常に青色）
         if (this.elements.executeFromUrlTabButton) {
             this.elements.executeFromUrlTabButton.textContent = '送信開始';
             this.elements.executeFromUrlTabButton.className = 'primary-button';
             this.elements.executeFromUrlTabButton.disabled = true;
         }
 
-        // 送信停止ボタン：無効（停止中表示、常に赤色）
         if (this.elements.stopFromUrlTabButton) {
             this.elements.stopFromUrlTabButton.textContent = '停止中...';
             this.elements.stopFromUrlTabButton.className = 'danger-button';
@@ -601,22 +437,14 @@ export class UrlManager {
     }
 
     // ====================================
-    // 状態復元機能（詳細状態対応）
+    // 状態復元と管理
     // ====================================
 
-    /**
-     * ストレージからボタン状態を復元
-     * @param {Function} executeHandler - 実行ボタンのハンドラー
-     * @param {Function} stopHandler - 停止ボタンのハンドラー
-     * @returns {Promise<string>} 復元された状態
-     */
     async restoreButtonStateFromStorage(executeHandler, stopHandler) {
         try {
-            // ハンドラーを保存
             this.executeHandler = executeHandler;
             this.stopHandler = stopHandler;
             
-            // ストレージから送信状態を取得
             const data = await chrome.storage.local.get([
                 STORAGE_KEYS.SENDING_STATE,
                 STORAGE_KEYS.SENDING_IN_PROGRESS
@@ -624,78 +452,77 @@ export class UrlManager {
 
             let currentState = SENDING_STATES.IDLE;
 
-            // 詳細状態が利用可能な場合
             if (data[STORAGE_KEYS.SENDING_STATE] && isValidSendingState(data[STORAGE_KEYS.SENDING_STATE])) {
                 currentState = data[STORAGE_KEYS.SENDING_STATE];
-            } 
-            // 後方互換性：古いフラグから状態を推測
-            else if (data[STORAGE_KEYS.SENDING_IN_PROGRESS]) {
+            } else if (data[STORAGE_KEYS.SENDING_IN_PROGRESS]) {
                 currentState = SENDING_STATES.SENDING;
             }
 
-            // 状態に応じてボタンを設定
             this.syncButtonStatesFromStorage(currentState);
             this.lastSyncedState = currentState;
 
-            console.log(`UrlManager: Button state restored to ${currentState}`);
+            console.log(`UrlManager: ボタン状態を${currentState}に復元しました`);
             return currentState;
 
         } catch (error) {
-            console.error('UrlManager: Failed to restore button state:', error);
-            // エラー時は安全に待機状態に設定
+            console.error('UrlManager: ボタン状態の復元に失敗しました:', error);
             this.setButtonsToExecuteState(executeHandler);
             return SENDING_STATES.IDLE;
         }
     }
 
     // ====================================
-    // 後方互換性維持メソッド（元の実装から保持）
+    // 後方互換性
     // ====================================
 
-    /**
-     * 実行状態ボタンに設定（後方互換性）
-     * @param {Function} executeHandler - 実行ハンドラー
-     */
     setExecuteButtonToExecuteState(executeHandler) {
         this.setButtonsToExecuteState(executeHandler);
     }
 
-    /**
-     * 停止状態ボタンに設定（後方互換性）
-     * @param {Function} stopHandler - 停止ハンドラー
-     */
     setExecuteButtonToStopState(stopHandler) {
         this.setButtonsToSendingState(stopHandler);
     }
 
-    /**
-     * 無効状態ボタンに設定（後方互換性）
-     */
     setExecuteButtonToDisabledState() {
         this.setButtonsToStoppingState();
     }
 
-    /**
-     * URL管理クラスの破棄（リスナークリーンアップ付き）
-     */
+    syncButtonStateDirect(state) {
+        if (isValidSendingState(state)) {
+            this.syncButtonStatesFromStorage(state);
+            this.lastSyncedState = state;
+        }
+    }
+
+    setPrioritizeExternalControl(prioritizeExternal) {
+        if (prioritizeExternal && this.isListenerRegistered) {
+            chrome.storage.onChanged.removeListener(this.storageListener);
+            this.isListenerRegistered = false;
+        } else if (!prioritizeExternal && !this.isListenerRegistered && this.storageListener) {
+            chrome.storage.onChanged.addListener(this.storageListener);
+            this.isListenerRegistered = true;
+        }
+    }
+
+    // ====================================
+    // クリーンアップ
+    // ====================================
+
     destroy() {
-        // Debounceタイマーをクリア
         if (this.syncDebounceTimer) {
             clearTimeout(this.syncDebounceTimer);
             this.syncDebounceTimer = null;
         }
 
-        // ストレージリスナーを削除
         if (this.storageListener && this.isListenerRegistered) {
             try {
                 chrome.storage.onChanged.removeListener(this.storageListener);
-                console.log('UrlManager: Storage listener removed during cleanup');
+                console.log('UrlManager: ストレージリスナーを削除しました');
             } catch (error) {
-                console.warn('UrlManager: Failed to remove storage listener:', error);
+                console.warn('UrlManager: ストレージリスナーの削除に失敗しました:', error);
             }
         }
 
-        // イベントハンドラーを削除
         this.removeEventHandlers();
         
         // 参照をクリア
