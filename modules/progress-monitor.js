@@ -1,7 +1,7 @@
 /**
  * プログレス監視モジュール
  * バッチ処理の進捗監視とUI更新を担当
- * 修正版: 詳細状態管理システム(SENDING_STATE)に統一、sendingInProgress廃止対応
+ * 修正版: Dashboard連携によるリアルタイム進捗表示対応
  */
 
 import { ExDB } from '../shared/database.js';
@@ -21,6 +21,9 @@ export class ProgressMonitor {
         this.showToastFunction = config.showToast || null;
         this.progressUpdateInterval = config.progressUpdateInterval || PROGRESS_UPDATE_INTERVAL;
         
+        // 【重要修正】Dashboard参照を追加
+        this.dashboard = config.dashboard || null;
+        
         // コールバック関数
         this.onProgressCompleted = config.onProgressCompleted || null;
         this.onProgressUpdate = config.onProgressUpdate || null;
@@ -35,15 +38,10 @@ export class ProgressMonitor {
             lastTotalCount: 0
         };
         
-        // 外部サービス参照（後から設定可能）
+        // 外部サービス参照
         this.storageService = config.storageService || null;
     }
 
-    /**
-     * トーストメッセージを表示
-     * @param {string} message - 表示メッセージ
-     * @param {string} type - メッセージタイプ
-     */
     showToast(message, type = 'info') {
         if (this.showToastFunction) {
             this.showToastFunction(message, type);
@@ -56,13 +54,8 @@ export class ProgressMonitor {
     // 進捗監視制御
     // ====================================
 
-    /**
-     * 進捗監視を開始する
-     * @param {Object} options - 監視オプション
-     */
     startProgressMonitoring(options = {}) {
         try {
-            // 既存の監視があれば停止
             this.stopProgressMonitoring();
             
             // 初期状態をリセット
@@ -76,7 +69,6 @@ export class ProgressMonitor {
                 this.checkProgress();
             }, this.progressUpdateInterval);
 
-            // 開始コールバック
             if (this.onMonitoringStarted) {
                 this.onMonitoringStarted();
             }
@@ -88,16 +80,12 @@ export class ProgressMonitor {
         }
     }
 
-    /**
-     * 進捗監視を停止する
-     */
     stopProgressMonitoring() {
         try {
             if (this.progressMonitoringInterval) {
                 clearInterval(this.progressMonitoringInterval);
                 this.progressMonitoringInterval = null;
                 
-                // 停止コールバック
                 if (this.onMonitoringStopped) {
                     this.onMonitoringStopped();
                 }
@@ -110,7 +98,7 @@ export class ProgressMonitor {
     }
 
     /**
-     * 進捗をチェックする
+     * 進捗をチェックする（Dashboard連携版）
      */
     async checkProgress() {
         try {
@@ -128,20 +116,13 @@ export class ProgressMonitor {
             if (latestTodo.completed && !this.lastProgressState.isCompleted) {
                 this.lastProgressState.isCompleted = true;
                 
-                // ====================================
-                // 修正: 詳細状態管理システムに統一
-                // setSendingProgress(false)を削除し、直接ストレージ操作に変更
-                // ====================================
-                
                 try {
-                    // 詳細状態管理システムを使用してIDLE状態に設定
                     await chrome.storage.local.set({ 
                         [STORAGE_KEYS.SENDING_STATE]: SENDING_STATES.IDLE 
                     });
                     console.log('Progress monitoring: Set sending state to IDLE');
                 } catch (storageError) {
                     console.error('Failed to update sending state:', storageError);
-                    // フォールバック: 古いキーも削除を試行
                     try {
                         await chrome.storage.local.remove('sendingInProgress');
                     } catch (fallbackError) {
@@ -149,18 +130,15 @@ export class ProgressMonitor {
                     }
                 }
 
-                // 完了コールバック
                 if (this.onProgressCompleted) {
                     await this.onProgressCompleted(progressInfo);
                 }
                 
-                // 監視を停止
                 this.stopProgressMonitoring();
-                
                 this.showToast('処理が完了しました', 'success');
             }
 
-            // 進捗更新コールバック（完了していない場合）
+            // 【重要修正】進捗更新時のDashboard連携
             if (!latestTodo.completed && this.onProgressUpdate) {
                 await this.onProgressUpdate(progressInfo);
             }
@@ -171,7 +149,6 @@ export class ProgressMonitor {
 
         } catch (error) {
             console.error('Progress check failed:', error);
-            // エラーが発生しても監視は継続（BatchServiceの元の動作に合わせる）
         }
     }
 
@@ -179,10 +156,6 @@ export class ProgressMonitor {
     // 進捗情報取得
     // ====================================
 
-    /**
-     * 現在のバッチ処理タスクの進捗情報を取得する
-     * @returns {Promise<Object>} 進捗情報オブジェクト
-     */
     async getBatchProgress() {
         try {
             const db = new ExDB();
@@ -215,10 +188,6 @@ export class ProgressMonitor {
         }
     }
 
-    /**
-     * 空の進捗情報を作成する
-     * @returns {Object} 空の進捗情報オブジェクト
-     */
     createEmptyProgressInfo() {
         return {
             total: 0,
@@ -233,30 +202,18 @@ export class ProgressMonitor {
         };
     }
 
-    /**
-     * 送信進行状態を確認する（詳細状態管理システム対応版）
-     * @returns {Promise<boolean>} 送信進行中の場合はtrue
-     */
     async isSendingInProgress() {
         try {
-            // ====================================
-            // 修正: 詳細状態管理システムを使用
-            // getSendingProgress()を削除し、SENDING_STATEを直接確認
-            // ====================================
-            
-            // 詳細状態管理システムから状態を取得
             const data = await chrome.storage.local.get([
                 STORAGE_KEYS.SENDING_STATE,
-                'sendingInProgress' // 後方互換性のため
+                'sendingInProgress'
             ]);
 
-            // 詳細状態が利用可能な場合
             if (data[STORAGE_KEYS.SENDING_STATE] && isValidSendingState(data[STORAGE_KEYS.SENDING_STATE])) {
                 const currentState = data[STORAGE_KEYS.SENDING_STATE];
                 return currentState === SENDING_STATES.SENDING || currentState === SENDING_STATES.STOPPING;
             }
 
-            // 後方互換性: 古いフラグをフォールバック
             return data.sendingInProgress || false;
 
         } catch (error) {
@@ -269,10 +226,6 @@ export class ProgressMonitor {
     // 状態管理
     // ====================================
 
-    /**
-     * 監視状態を取得する
-     * @returns {Object} 現在の監視状態
-     */
     getMonitoringState() {
         return {
             isMonitoring: this.progressMonitoringInterval !== null,
@@ -281,9 +234,6 @@ export class ProgressMonitor {
         };
     }
 
-    /**
-     * 進捗状態をリセットする
-     */
     resetProgressState() {
         this.lastProgressState = {
             isCompleted: false,
@@ -292,10 +242,6 @@ export class ProgressMonitor {
         };
     }
 
-    /**
-     * 現在の送信状態を取得する（詳細状態管理システム対応）
-     * @returns {Promise<string>} 現在の送信状態
-     */
     async getCurrentSendingState() {
         try {
             const data = await chrome.storage.local.get([STORAGE_KEYS.SENDING_STATE]);
@@ -312,10 +258,6 @@ export class ProgressMonitor {
         }
     }
 
-    /**
-     * 進捗監視が必要かどうかを判断する
-     * @returns {Promise<boolean>} 監視が必要な場合はtrue
-     */
     async shouldMonitorProgress() {
         try {
             const currentState = await this.getCurrentSendingState();
@@ -327,13 +269,9 @@ export class ProgressMonitor {
     }
 
     // ====================================
-    // 設定更新
+    // 設定更新（Dashboard参照設定機能追加）
     // ====================================
 
-    /**
-     * コールバック関数を設定する
-     * @param {Object} callbacks - コールバック関数のマッピング
-     */
     setCallbacks(callbacks) {
         if (callbacks.onProgressCompleted) {
             this.onProgressCompleted = callbacks.onProgressCompleted;
@@ -349,21 +287,22 @@ export class ProgressMonitor {
         }
     }
 
-    /**
-     * ストレージサービスを設定する
-     * @param {StorageService} storageService - ストレージサービスインスタンス
-     */
     setStorageService(storageService) {
         this.storageService = storageService;
+    }
+
+    /**
+     * 【新規追加】Dashboard参照を設定する
+     * @param {Dashboard} dashboard - Dashboardインスタンス
+     */
+    setDashboard(dashboard) {
+        this.dashboard = dashboard;
     }
 
     // ====================================
     // クリーンアップ
     // ====================================
 
-    /**
-     * ProgressMonitorを破棄する（クリーンアップ）
-     */
     destroy() {
         this.stopProgressMonitoring();
         this.showToastFunction = null;
@@ -372,14 +311,10 @@ export class ProgressMonitor {
         this.onMonitoringStarted = null;
         this.onMonitoringStopped = null;
         this.storageService = null;
+        this.dashboard = null;
     }
 }
 
-/**
- * ProgressMonitorインスタンスを作成
- * @param {Object} config - 設定オブジェクト
- * @returns {ProgressMonitor} ProgressMonitorインスタンス
- */
 export function createProgressMonitor(config) {
     return new ProgressMonitor(config);
 }
