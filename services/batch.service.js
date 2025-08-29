@@ -1,9 +1,9 @@
 /**
  * バッチ処理サービス
  * URL処理の実行、停止、進捗管理を担当
+ * 修正版: 送信開始時の進捗監視リセット・再開機能追加
  */
 
-// 共通モジュールのインポート
 import { ExDB } from '../shared/database.js';
 import {
     ACTION_STOP, ACTION_STOP_COMPLETED, ACTION_EXECUTE,
@@ -24,17 +24,15 @@ export class BatchService {
         this.authService = dependencies.authService || null;
         this.refreshDashboardFunction = dependencies.refreshDashboard || null;
 
-        // 内部状態（詳細化）
+        // 内部状態
         this.currentState = SENDING_STATES.IDLE;
-
-        // 重複実行防止フラグ
         this.isProcessing = false;
 
-        // Chrome runtime listener reference
+        // Chrome runtime listener
         this.stopStateListener = null;
         this.listenerAttached = false;
 
-        // ProgressMonitorインスタンスを作成
+        // ProgressMonitorインスタンス作成
         this.progressMonitor = new ProgressMonitor({
             showToast: this.showToastFunction,
             onProgressCompleted: this.handleProgressCompleted.bind(this),
@@ -45,28 +43,17 @@ export class BatchService {
         this.initialize();
     }
 
-    /**
-     * サービスを初期化
-     */
     initialize() {
         this.setupStopStateListener();
         this.startProgressMonitoring();
     }
 
-    /**
-     * トーストメッセージを表示
-     * @param {string} message - 表示メッセージ
-     * @param {string} type - メッセージタイプ
-     */
     showToast(message, type = 'info') {
         if (this.showToastFunction) {
             this.showToastFunction(message, type);
         }
     }
 
-    /**
-     * ダッシュボードをリフレッシュ
-     */
     async refreshDashboard() {
         if (this.refreshDashboardFunction) {
             await this.refreshDashboardFunction();
@@ -74,13 +61,9 @@ export class BatchService {
     }
 
     // ====================================
-    // タブライフサイクル管理（元タブID記録機能）
+    // タブライフサイクル管理
     // ====================================
 
-    /**
-     * 元のタブID（送信開始前のタブ）をストレージに記録
-     * @param {number} tabId - 記録するタブID
-     */
     async storeOriginalTabId(tabId) {
         try {
             await chrome.storage.local.set({ 
@@ -93,20 +76,15 @@ export class BatchService {
         }
     }
 
-    /**
-     * 記録された元のタブIDを取得
-     * @returns {Promise<number|null>} タブID（なければnull）
-     */
     async getStoredOriginalTabId() {
         try {
             const data = await chrome.storage.local.get(['originalTabId', 'originalTabTimestamp']);
             
-            // タブIDが記録されていない場合
             if (!data.originalTabId) {
                 return null;
             }
 
-            // 記録から2時間以上経過している場合は無効とする
+            // 2時間以上経過している場合は無効
             const twoHours = 2 * 60 * 60 * 1000;
             if (data.originalTabTimestamp && (Date.now() - data.originalTabTimestamp) > twoHours) {
                 await this.clearOriginalTabId();
@@ -120,9 +98,6 @@ export class BatchService {
         }
     }
 
-    /**
-     * 記録された元のタブIDをクリア
-     */
     async clearOriginalTabId() {
         try {
             await chrome.storage.local.remove(['originalTabId', 'originalTabTimestamp']);
@@ -132,13 +107,8 @@ export class BatchService {
         }
     }
 
-    /**
-     * 現在のタブIDを取得して記録する（軽量化版）
-     * @returns {Promise<number|null>} 取得・記録されたタブID
-     */
     async getCurrentAndStoreTabId() {
         try {
-            // main.html URLを持つタブを直接検索（最も確実で高速）
             const mainUrl = chrome.runtime.getURL('ui/main.html');
             const tabs = await chrome.tabs.query({ url: mainUrl });
             
@@ -158,10 +128,6 @@ export class BatchService {
         }
     }
 
-    /**
-     * process.htmlタブIDをストレージに記録
-     * @param {number} tabId - 記録するタブID
-     */
     async storeProcessTabId(tabId) {
         try {
             await chrome.storage.local.set({ 
@@ -174,20 +140,15 @@ export class BatchService {
         }
     }
 
-    /**
-     * 記録されたprocess.htmlタブIDを取得
-     * @returns {Promise<number|null>} タブID（なければnull）
-     */
     async getStoredProcessTabId() {
         try {
             const data = await chrome.storage.local.get(['processTabId', 'processTabTimestamp']);
             
-            // タブIDが記録されていない場合
             if (!data.processTabId) {
                 return null;
             }
 
-            // 記録から1時間以上経過している場合は無効とする
+            // 1時間以上経過している場合は無効
             const oneHour = 60 * 60 * 1000;
             if (data.processTabTimestamp && (Date.now() - data.processTabTimestamp) > oneHour) {
                 await this.clearProcessTabId();
@@ -201,9 +162,6 @@ export class BatchService {
         }
     }
 
-    /**
-     * 記録されたprocess.htmlタブIDをクリア
-     */
     async clearProcessTabId() {
         try {
             await chrome.storage.local.remove(['processTabId', 'processTabTimestamp']);
@@ -214,14 +172,9 @@ export class BatchService {
     }
 
     // ====================================
-    // 統一状態管理システム（競合解消版）
+    // 状態管理システム
     // ====================================
 
-    /**
-     * 送信状態を変更する（統一版：詳細状態管理のみ）
-     * @param {string} newState - 新しい状態
-     * @param {boolean} updateStorage - ストレージも更新するかどうか
-     */
     async setSendingState(newState, updateStorage = true) {
         if (!isValidSendingState(newState)) {
             console.error(`Invalid sending state: ${newState}`);
@@ -237,47 +190,28 @@ export class BatchService {
 
         if (updateStorage) {
             try {
-                // ====================================
-                // 修正：詳細状態管理システムのみに統一
-                // storage.service.jsとの競合を解消
-                // ====================================
                 await chrome.storage.local.set({ 
                     [STORAGE_KEYS.SENDING_STATE]: newState
-                    // [STORAGE_KEYS.SENDING_IN_PROGRESS] を削除（競合の原因）
                 });
                 
                 console.log(`State updated to: ${newState}`);
             } catch (error) {
                 console.error('Failed to update sending state in storage:', error);
-                // ストレージ更新に失敗した場合は状態を戻す
                 this.currentState = previousState;
                 return false;
             }
         }
 
-        // 状態変更に応じてUIを更新
         this.updateUIBasedOnState(newState);
         return true;
     }
 
-    /**
-     * 現在の送信状態を取得する
-     * @returns {string} 現在の状態
-     */
     getCurrentState() {
         return this.currentState;
     }
 
-    /**
-     * ストレージから送信状態を読み込む（統一版）
-     * @returns {Promise<string>} 読み込まれた状態
-     */
     async loadSendingStateFromStorage() {
         try {
-            // ====================================
-            // 修正：詳細状態管理システムのみを使用
-            // 後方互換処理を削除してパフォーマンス改善
-            // ====================================
             const data = await chrome.storage.local.get([STORAGE_KEYS.SENDING_STATE]);
 
             if (data[STORAGE_KEYS.SENDING_STATE] && isValidSendingState(data[STORAGE_KEYS.SENDING_STATE])) {
@@ -291,10 +225,6 @@ export class BatchService {
         }
     }
 
-    /**
-     * 状態に基づいてUIを更新する
-     * @param {string} state - 現在の状態
-     */
     updateUIBasedOnState(state) {
         if (!this.urlManager) return;
 
@@ -329,17 +259,12 @@ export class BatchService {
         }
     }
 
-    /**
-     * 停止状態リスナーを設定する（修正版）
-     */
     setupStopStateListener() {
-        // 既存のリスナーを削除
         if (this.stopStateListener && this.listenerAttached) {
             try {
                 chrome.runtime.onMessage.removeListener(this.stopStateListener);
                 this.listenerAttached = false;
             } catch (error) {
-                // リスナーが存在しない場合のエラーを無視
                 console.warn('Failed to remove existing listener:', error.message);
             }
         }
@@ -364,31 +289,23 @@ export class BatchService {
         }
     }
 
-    /**
-     * 停止完了時の処理
-     */
     async handleStopCompleted() {
-        // 状態を完了に変更
         await this.setSendingState(SENDING_STATES.COMPLETED);
 
-        // ダッシュボードをリセット
         if (this.dashboard) {
             this.dashboard.resetProgress();
         }
 
-        // 少し待ってから待機状態に戻す
         setTimeout(async () => {
             await this.setSendingState(SENDING_STATES.IDLE);
         }, 1000);
     }
 
     /**
-     * 実行ボタンのイベントハンドラー（パフォーマンス改善版）
+     * 実行ボタンのイベントハンドラー（進捗監視リアルタイム対応版）
      */
     async executeButtonHandler() {
-        // ====================================
-        // 重複実行防止（即座に実行）
-        // ====================================
+        // 重複実行防止
         if (this.isProcessing) {
             console.log('Execute button handler already processing, ignoring click');
             return;
@@ -399,15 +316,10 @@ export class BatchService {
             return;
         }
 
-        // 処理開始フラグを設定（重複クリック防止）
         this.isProcessing = true;
 
         try {
-            // ====================================
-            // 高速化：必要最小限の事前チェック
-            // ====================================
-
-            // ライセンス確認（高速）
+            // ライセンス確認
             let licenseValid = false;
             if (this.authService) {
                 licenseValid = await this.authService.isLicenseValid();
@@ -421,7 +333,7 @@ export class BatchService {
                 return;
             }
 
-            // データベースの初期化確認（軽量）
+            // データベース初期化確認
             const db = new ExDB();
             try {
                 await db.openDB();
@@ -430,10 +342,7 @@ export class BatchService {
                 return;
             }
 
-            // ====================================
             // URL検証（必要に応じて自動保存）
-            // ====================================
-
             let urlsToProcess = [];
             
             if (this.urlManager) {
@@ -442,7 +351,7 @@ export class BatchService {
                 if (urlsToProcess.length > 0) {
                     console.log(`Auto-saving ${urlsToProcess.length} URLs before validation`);
                     await this.urlManager.saveUrlList();
-                    await new Promise(resolve => setTimeout(resolve, 500)); // 短縮
+                    await new Promise(resolve => setTimeout(resolve, 500));
                 }
                 
                 const urlValidation = await this.urlManager.validateUrlList();
@@ -452,10 +361,7 @@ export class BatchService {
                 }
             }
 
-            // ====================================
-            // Todo処理（軽量化）
-            // ====================================
-
+            // Todo処理
             let latestTodo = await db.getLatestTodo();
 
             if (!latestTodo) {
@@ -490,24 +396,34 @@ export class BatchService {
                 }
             }
 
-            // ====================================
-            // ユーザー確認（ここでやっと confirm）
-            // ====================================
+            // ユーザー確認
             if (!confirm(`${latestTodo.description.length}件のURLに対して送信を開始しますか？`)) {
                 return;
             }
 
-            // ====================================
-            // confirm後に元タブID記録（軽量版）
-            // ====================================
+            // 元タブID記録
             const originalTabId = await this.getCurrentAndStoreTabId();
             if (originalTabId) {
                 console.log(`Original tab ID recorded: ${originalTabId}`);
             }
 
             // ====================================
-            // 新タスク作成（完了済みの場合）
+            // 【重要修正】送信開始前の進捗監視リセット・再開
             // ====================================
+            
+            // 既存の進捗監視を停止
+            this.progressMonitor.stopProgressMonitoring();
+            
+            // 進捗状態をリセット
+            this.progressMonitor.resetProgressState();
+            
+            // ダッシュボードの進捗表示を初期化
+            if (this.dashboard) {
+                this.dashboard.resetProgress();
+                this.dashboard.invalidateCache();
+            }
+            
+            // 新規タスク作成（完了済みの場合）
             if (latestTodo.completed) {
                 const now = new Date();
                 const title = now.toLocaleString('ja-JP');
@@ -519,22 +435,20 @@ export class BatchService {
                 }));
                 
                 await db.addTodo(title, newDescription);
-                await new Promise(resolve => setTimeout(resolve, 500)); // 短縮
+                await new Promise(resolve => setTimeout(resolve, 500));
             }
-
-            // ====================================
-            // 送信開始
-            // ====================================
 
             // 状態を送信中に変更
             await this.setSendingState(SENDING_STATES.SENDING);
 
+            // ダッシュボードを更新
             await this.refreshDashboard();
+
+            // 【重要修正】進捗監視を再開（新しいタスクに対応）
+            this.progressMonitor.startProgressMonitoring();
 
             // 処理用タブを作成
             const tab = await chrome.tabs.create({ url: 'ui/process.html' });
-            
-            // タブIDをストレージに記録
             await this.storeProcessTabId(tab.id);
             
             // タブ作成待機時間短縮
@@ -556,14 +470,10 @@ export class BatchService {
             // エラー時は状態をリセット
             await this.setSendingState(SENDING_STATES.IDLE);
         } finally {
-            // 処理完了フラグをクリア
             this.isProcessing = false;
         }
     }
 
-    /**
-     * 停止ボタンのイベントハンドラー
-     */
     async stopButtonHandler() {
         try {
             if (this.currentState !== SENDING_STATES.SENDING) {
@@ -575,7 +485,6 @@ export class BatchService {
                 return;
             }
 
-            // 状態を停止処理中に変更
             await this.setSendingState(SENDING_STATES.STOPPING);
 
             chrome.runtime.sendMessage({ action: ACTION_STOP }, (response) => {
@@ -588,61 +497,47 @@ export class BatchService {
 
         } catch (error) {
             this.showToast('送信停止に失敗しました', 'error');
-            // エラー時は送信中状態に戻す
             await this.setSendingState(SENDING_STATES.SENDING);
         }
     }
 
-    /**
-     * 送信状態を確認して復元する（統一版）
-     */
     async checkAndRestoreSendingState() {
         try {
-            // ストレージから状態を読み込み
             const storedState = await this.loadSendingStateFromStorage();
             
             if (storedState === SENDING_STATES.IDLE) {
-                // 待機状態の場合はそのまま設定
                 await this.setSendingState(SENDING_STATES.IDLE, false);
                 return;
             }
 
-            // データベースの状態もチェック
             const db = new ExDB();
             const latestTodo = await db.getLatestTodo();
             
             if (!latestTodo || !latestTodo.description) {
-                // タスクがない場合は待機状態に設定
                 await this.setSendingState(SENDING_STATES.IDLE);
                 return;
             }
 
             if (latestTodo.completed) {
-                // タスクが完了済みの場合は待機状態に設定
                 await this.setSendingState(SENDING_STATES.IDLE);
                 return;
             }
 
-            // 処理済みアイテムの状況を確認
             const hasProcessed = latestTodo.description.some(item => item.result !== '');
             const allProcessed = latestTodo.description.every(item => item.result !== '');
 
             if (allProcessed) {
-                // 全て処理済みの場合は完了状態に設定
                 await this.setSendingState(SENDING_STATES.COMPLETED);
                 return;
             }
 
-            // ストレージの状態に応じて復元
             switch (storedState) {
                 case SENDING_STATES.SENDING:
                     await this.setSendingState(SENDING_STATES.SENDING, false);
                     break;
-
                 case SENDING_STATES.STOPPING:
                     await this.setSendingState(SENDING_STATES.STOPPING, false);
                     break;
-
                 case SENDING_STATES.COMPLETED:
                     if (hasProcessed) {
                         await this.setSendingState(SENDING_STATES.COMPLETED, false);
@@ -650,7 +545,6 @@ export class BatchService {
                         await this.setSendingState(SENDING_STATES.IDLE);
                     }
                     break;
-
                 default:
                     await this.setSendingState(SENDING_STATES.IDLE);
                     break;
@@ -658,7 +552,6 @@ export class BatchService {
 
         } catch (error) {
             console.error('Failed to restore sending state:', error);
-            // エラー時は安全に待機状態に設定
             await this.setSendingState(SENDING_STATES.IDLE);
         }
     }
@@ -667,19 +560,11 @@ export class BatchService {
     // ProgressMonitorコールバック関数
     // ====================================
 
-    /**
-     * 進捗完了時のコールバック
-     * @param {Object} progressInfo - 進捗情報
-     */
     async handleProgressCompleted(progressInfo) {
         try {
-            // 状態を完了に変更
             await this.setSendingState(SENDING_STATES.COMPLETED);
-
-            // ダッシュボードを更新
             await this.refreshDashboard();
 
-            // 少し待ってから待機状態に戻す
             setTimeout(async () => {
                 await this.setSendingState(SENDING_STATES.IDLE);
             }, 2000);
@@ -688,15 +573,11 @@ export class BatchService {
         }
     }
 
-    /**
-     * 進捗更新時のコールバック
-     * @param {Object} progressInfo - 進捗情報
-     */
     async handleProgressUpdate(progressInfo) {
         try {
-            // ダッシュボードの定期更新
+            // ダッシュボードの軽量更新（進捗のみ）
             if (this.dashboard) {
-                await this.dashboard.refreshDashboard();
+                await this.dashboard.refreshProgressOnly();
             }
         } catch (error) {
             // エラーが発生しても監視は継続
@@ -704,40 +585,27 @@ export class BatchService {
     }
 
     // ====================================
-    // 進捗監視制御（ProgressMonitor委譲）
+    // 進捗監視制御
     // ====================================
 
-    /**
-     * 進捗監視を開始する
-     */
     startProgressMonitoring() {
         if (this.progressMonitor) {
             this.progressMonitor.startProgressMonitoring();
         }
     }
 
-    /**
-     * 進捗をチェックする（ProgressMonitor委譲）
-     */
     async checkProgress() {
         if (this.progressMonitor) {
             await this.progressMonitor.checkProgress();
         }
     }
 
-    /**
-     * 進捗監視を停止する（ProgressMonitor委譲）
-     */
     stopProgressMonitoring() {
         if (this.progressMonitor) {
             this.progressMonitor.stopProgressMonitoring();
         }
     }
 
-    /**
-     * 現在の実行状態を取得する
-     * @returns {Object} 実行状態オブジェクト
-     */
     getExecutionState() {
         return {
             currentState: this.currentState,
@@ -746,24 +614,15 @@ export class BatchService {
         };
     }
 
-    /**
-     * バッチ処理が実行中かどうかを確認する
-     * @returns {Promise<boolean>} 実行中の場合はtrue
-     */
     async isExecuting() {
         return this.currentState === SENDING_STATES.SENDING;
     }
 
-    /**
-     * 現在のバッチ処理タスクの進捗情報を取得する（ProgressMonitor委譲）
-     * @returns {Promise<Object>} 進捗情報オブジェクト
-     */
     async getBatchProgress() {
         if (this.progressMonitor) {
             return await this.progressMonitor.getBatchProgress();
         }
         
-        // フォールバック（空の進捗情報）
         return {
             total: 0,
             processed: 0,
@@ -777,10 +636,6 @@ export class BatchService {
         };
     }
 
-    /**
-     * バッチ処理を手動で停止する（UI操作なし）
-     * @returns {Promise<boolean>} 停止成功時はtrue
-     */
     async stopBatch() {
         try {
             return new Promise((resolve) => {
@@ -797,21 +652,11 @@ export class BatchService {
         }
     }
 
-    /**
-     * バッチ処理の状態をリセットする
-     */
     async resetBatchState() {
         try {
-            // 進捗監視を停止
             this.stopProgressMonitoring();
-
-            // 処理中フラグをクリア
             this.isProcessing = false;
-
-            // 状態を待機中に設定
             await this.setSendingState(SENDING_STATES.IDLE);
-
-            // 進捗監視を再開
             this.startProgressMonitoring();
 
             this.showToast('バッチ処理状態をリセットしました', 'info');
@@ -820,14 +665,9 @@ export class BatchService {
         }
     }
 
-    /**
-     * サービスを破棄する（クリーンアップ）
-     */
     destroy() {
-        // 進捗監視を停止
         this.stopProgressMonitoring();
 
-        // Chrome runtime listenerを削除
         if (this.stopStateListener && this.listenerAttached) {
             try {
                 chrome.runtime.onMessage.removeListener(this.stopStateListener);
@@ -846,18 +686,14 @@ export class BatchService {
         this.stopStateListener = null;
     }
 
-    /**
-     * 実行ボタンハンドラーを取得する（外部アクセス用）
-     * @returns {Function} 実行ボタンハンドラー関数
-     */
+    // ====================================
+    // 外部アクセス用メソッド
+    // ====================================
+
     getExecuteButtonHandler() {
         return () => this.executeButtonHandler();
     }
 
-    /**
-     * 停止ボタンハンドラーを取得する（外部アクセス用）
-     * @returns {Function} 停止ボタンハンドラー関数
-     */
     getStopButtonHandler() {
         return () => this.stopButtonHandler();
     }
