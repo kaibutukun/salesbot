@@ -254,7 +254,6 @@ async function getStoredOriginalTabId() {
 async function clearOriginalTabId() {
     try {
         await chrome.storage.local.remove(['originalTabId', 'originalTabTimestamp']);
-        console.log('Original tab ID cleared from background');
     } catch (error) {
         console.error('Failed to clear original tab ID:', error);
     }
@@ -292,7 +291,6 @@ async function getStoredProcessTabId() {
 async function clearProcessTabId() {
     try {
         await chrome.storage.local.remove(['processTabId', 'processTabTimestamp']);
-        console.log('Process tab ID cleared from background');
     } catch (error) {
         console.error('Failed to clear process tab ID:', error);
     }
@@ -304,15 +302,12 @@ async function clearProcessTabId() {
  */
 async function notifyAllTabsStopCompleted() {
     try {
-        console.log('notifyAllTabsStopCompleted: Sending stop notification to related tabs');
-        
         const targetUrls = [
             chrome.runtime.getURL('ui/main.html'),
             chrome.runtime.getURL('ui/process.html')
         ];
 
         const allTabs = await chrome.tabs.query({ url: targetUrls });
-        console.log(`notifyAllTabsStopCompleted: Found ${allTabs.length} related tabs`);
 
         // 各タブに停止完了通知を送信（タブ操作は行わない）
         const notificationPromises = allTabs.map(async (tab) => {
@@ -321,10 +316,8 @@ async function notifyAllTabsStopCompleted() {
                     action: ACTION_STOP_COMPLETED,
                     timestamp: Date.now()
                 });
-                console.log(`notifyAllTabsStopCompleted: Successfully notified tab ${tab.id}`);
                 return { tabId: tab.id, success: true };
             } catch (error) {
-                console.log(`notifyAllTabsStopCompleted: Failed to notify tab ${tab.id}: ${error.message}`);
                 return { tabId: tab.id, success: false, error: error.message };
             }
         });
@@ -332,8 +325,6 @@ async function notifyAllTabsStopCompleted() {
         const results = await Promise.all(notificationPromises);
         const successful = results.filter(r => r.success).length;
         const failed = results.filter(r => !r.success).length;
-        
-        console.log(`notifyAllTabsStopCompleted: Notification results - Success: ${successful}, Failed: ${failed}`);
 
         return {
             total: allTabs.length,
@@ -838,11 +829,15 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 let excludeData = await chrome.storage.local.get(["excludeDomain"]);
                 let excludeDomain = excludeData.excludeDomain;
 
-                // 重複送信設定取得
+                // 重複送信設定取得（デフォルトtrueに変更）
                 let duplicateData = await chrome.storage.sync.get("DoNotDuplicateSend");
+                const isDuplicatePreventionEnabled = duplicateData.DoNotDuplicateSend !== undefined 
+                    ? duplicateData.DoNotDuplicateSend 
+                    : true; // デフォルト値をtrueに変更
+                
                 let sentUrlList = [];
 
-                if (duplicateData && duplicateData.DoNotDuplicateSend) {
+                if (isDuplicatePreventionEnabled) {
                     let todos = await db.getAllTodos();
                     for (let i = 0; i < todos.length; i++) {
                         if (todos[i].completed) {
@@ -913,8 +908,8 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
                         await updateProgress(latestTodo.id, i, result);
 
-                        // 成功時は送信済みリストに追加
-                        if (duplicateData && duplicateData.DoNotDuplicateSend && result.result === "成功") {
+                        // 成功時は送信済みリストに追加（修正版）
+                        if (isDuplicatePreventionEnabled && result.result === "成功") {
                             sentUrlList.push(result.contact);
                         }
                     }
@@ -933,7 +928,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                 
                 // process.htmlタブをdone.htmlに更新（新しいタブ作成なし）
                 chrome.tabs.update(tabId, { url: "ui/done.html" });
-                console.log(`Execution completed: Updated tab ${tabId} to done.html`);
 
             } catch (error) {
                 if (error.message === ERROR_STOP_REQUESTED) {
@@ -977,7 +971,6 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
                     
                     // process.htmlタブをdone.htmlに更新（新しいタブ作成なし）
                     chrome.tabs.update(tabId, { url: "ui/done.html" });
-                    console.log(`Stop completed: Updated tab ${tabId} to done.html`);
                 } else {
                     chrome.tabs.update(tabId, { url: "ui/error.html" });
                 }

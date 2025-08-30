@@ -129,13 +129,15 @@ export class SettingsManager {
     }
 
     /**
-     * 一般設定を読み込む
+     * 一般設定を読み込む（デフォルト値をtrueに変更）
      */
     async loadSettings() {
         try {
             const settingsData = await chrome.storage.sync.get(['DoNotDuplicateSend']);
             if (this.elements.preventDuplicateSend) {
-                this.elements.preventDuplicateSend.checked = settingsData.DoNotDuplicateSend || false;
+                this.elements.preventDuplicateSend.checked = settingsData.DoNotDuplicateSend !== undefined 
+                    ? settingsData.DoNotDuplicateSend 
+                    : true; // デフォルト値をtrueに変更
             }
         } catch (error) {
             this.showToast('設定の読み込みに失敗しました', 'error');
@@ -318,16 +320,18 @@ export class SettingsManager {
     }
 
     /**
-     * 重複送信防止設定を取得する
+     * 重複送信防止設定を取得する（デフォルト値をtrueに変更）
      * @returns {Promise<boolean>} 重複送信防止が有効かどうか
      */
     async getPreventDuplicateSend() {
         try {
             const settingsData = await chrome.storage.sync.get(['DoNotDuplicateSend']);
-            return settingsData.DoNotDuplicateSend || false;
+            return settingsData.DoNotDuplicateSend !== undefined 
+                ? settingsData.DoNotDuplicateSend 
+                : true; // デフォルト値をtrueに変更
         } catch (error) {
             console.error('Failed to get prevent duplicate send setting:', error);
-            return false;
+            return true; // エラー時もtrueを返す
         }
     }
 
